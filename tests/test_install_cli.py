@@ -211,6 +211,19 @@ def test_write_settings_secure_chmod(tmp_path, monkeypatch):
     assert chmod_calls == [(path, 0o600)]
 
 
+def test_write_settings_secure_skips_chmod_on_non_posix(tmp_path, monkeypatch):
+    chmod_calls: list[tuple[Path, int]] = []
+
+    monkeypatch.setattr("rain_bypass.install_cli.os.name", "nt")
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.os.chmod",
+        lambda path, mode: chmod_calls.append((path, mode)),
+    )
+    path = tmp_path / "settings.toml"
+    write_settings_secure(path, load_example_settings(weather={"api_key": "skip-chmod"}))
+    assert chmod_calls == []
+
+
 def test_run_install_skip_api_test(tmp_path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
     prompter = FakePrompter(secrets=["live-key"], confirms=[True, False, False])
