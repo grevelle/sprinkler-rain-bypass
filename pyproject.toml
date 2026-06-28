@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sprinkler-rain-bypass"
-version = "3.1.0"
+version = "3.2.0"
 description = "Raspberry Pi rain bypass controller for irrigation systems"
 readme = "README.md"
 license = { text = "MIT" }
@@ -35,7 +35,10 @@ rain_bypass = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "--cov=rain_bypass --cov-report=term-missing --cov-fail-under=100"
+addopts = "-m 'not live' --cov=rain_bypass --cov-report=term-missing --cov-fail-under=100"
+markers = [
+    "live: integration tests against the live Visual Crossing API (requires VISUAL_CROSSING_API_KEY)",
+]
 
 [tool.coverage.run]
 branch = true

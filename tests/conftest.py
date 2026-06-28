@@ -23,6 +23,9 @@ start_day = 19
 end_month = 9
 end_day = 12
 
+[weather]
+api_key = "test-key"
+
 [gpio]
 relay = 25
 watering_enabled_led = 4

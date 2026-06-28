@@ -45,6 +45,10 @@ class Season(FrozenModel):
     end_day: int = Field(ge=1, le=31)
 
 
+class Weather(FrozenModel):
+    api_key: str = Field(min_length=1)
+
+
 class Gpio(FrozenModel):
     relay: int
     watering_enabled_led: int
@@ -68,6 +72,7 @@ class Settings(FrozenModel):
     location: Location
     watering: Watering
     season: Season
+    weather: Weather
     gpio: Gpio
     runtime: Runtime
 

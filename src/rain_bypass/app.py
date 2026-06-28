@@ -14,9 +14,15 @@ from rain_bypass.gpio import PinFactory, watering_pins
 
 logger = logging.getLogger(__name__)
 
-MM_PER_INCH = 25.4
-FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
-ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+VISUAL_CROSSING = (
+    "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
+)
+# Timeline docs: include=days + elements limits payload and queryCost (~1 record/day).
+TIMELINE_QUERY = {
+    "unitGroup": "us",
+    "elements": "datetime,precip",
+    "include": "days",
+}
 
 
 def in_season(season: Season, today: date) -> bool:
@@ -25,14 +31,37 @@ def in_season(season: Season, today: date) -> bool:
     return start <= today <= end if start <= end else today >= start or today <= end
 
 
-def fetch_precip(settings: Settings) -> float:
+def precip_window(settings: Settings) -> tuple[date, date]:
     today = local_today(settings.location)
-    days = settings.watering.past_days
-    start, end = today - timedelta(days=days - 1), today
+    past_days = settings.watering.past_days
+    return today - timedelta(days=past_days - 1), today
+
+
+def fetch_precip(settings: Settings) -> float:
+    start, end = precip_window(settings)
     loc = settings.location
     timeout = settings.runtime.weather_timeout_seconds
-    daily = _open_meteo_daily(loc.latitude, loc.longitude, start, end, timeout)
-    return _sum_mm(daily, start, end) / MM_PER_INCH
+    payload = _get_timeline(
+        loc.latitude,
+        loc.longitude,
+        start,
+        end,
+        api_key=settings.weather.api_key,
+        timeout=timeout,
+    )
+    _log_timeline_meta(payload, settings)
+    daily = payload.get("days")
+    if not isinstance(daily, list):
+        raise requests.RequestException("visual crossing response missing daily data")
+    inches = _sum_precip(daily, start, end)
+    logger.info(
+        "visual_crossing precipitation %.2f in over %s days (%s to %s)",
+        inches,
+        settings.watering.past_days,
+        start,
+        end,
+    )
+    return inches
 
 
 def decide(settings: Settings, state: State) -> tuple[bool, float | None, bool, str | None]:
@@ -59,47 +88,89 @@ def decide(settings: Settings, state: State) -> tuple[bool, float | None, bool, 
     return required, rainfall, True, None
 
 
-def _open_meteo_daily(lat: float, lon: float, start: date, end: date, timeout: int) -> dict:
-    base = {"latitude": lat, "longitude": lon, "daily": "precipitation_sum", "timezone": "auto"}
-    if end >= date.today() - timedelta(days=2):
-        payload = _get(
-            FORECAST_URL,
-            params={
-                **base,
-                "past_days": max(92, (date.today() - start).days + 1),
-                "forecast_days": max(0, (end - date.today()).days + 1),
-            },
-            timeout=timeout,
-        )
-        if payload.get("daily", {}).get("time"):
-            return payload["daily"]
-    payload = _get(
-        ARCHIVE_URL,
-        params={**base, "start_date": start.isoformat(), "end_date": end.isoformat()},
+def _timeline_url(lat: float, lon: float, start: date, end: date) -> str:
+    return f"{VISUAL_CROSSING}/{lat},{lon}/{start}/{end}"
+
+
+def _get_timeline(
+    lat: float,
+    lon: float,
+    start: date,
+    end: date,
+    *,
+    api_key: str,
+    timeout: int,
+) -> dict:
+    return _get(
+        _timeline_url(lat, lon, start, end),
+        params={**TIMELINE_QUERY, "key": api_key},
         timeout=timeout,
     )
-    return payload.get("daily", {})
 
 
 def _get(url: str, *, params: dict, timeout: int) -> dict:
     try:
         response = requests.get(url, params=params, timeout=timeout)
         response.raise_for_status()
-        return response.json()
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        logger.warning("weather request failed status=%s", status)
+        if status == 401:
+            raise requests.RequestException(
+                "visual crossing unauthorized; check api_key"
+            ) from exc
+        if status == 429:
+            raise requests.RequestException("visual crossing rate limit exceeded") from exc
+        raise requests.RequestException(f"visual crossing HTTP {status}") from exc
     except requests.RequestException:
         logger.warning("weather request failed")
         raise
 
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise requests.RequestException("visual crossing returned invalid JSON") from exc
 
-def _sum_mm(daily: dict, start: date, end: date) -> float:
-    dates = daily.get("time", [])
-    amounts = daily.get("precipitation_sum", [])
+
+def _log_timeline_meta(payload: dict, settings: Settings) -> None:
+    query_cost = payload.get("queryCost")
+    if query_cost is not None:
+        logger.debug("visual_crossing queryCost=%s", query_cost)
+
+    api_tz = payload.get("timezone")
+    config_tz = settings.location.timezone
+    if api_tz and api_tz != config_tz:
+        logger.warning(
+            "location timezone %s differs from visual crossing %s; window uses config timezone",
+            config_tz,
+            api_tz,
+        )
+
+
+def _sum_precip(days: list, start: date, end: date) -> float:
+    if not days:
+        raise requests.RequestException("visual crossing returned no daily rows")
+
     start_s, end_s = start.isoformat(), end.isoformat()
-    return sum(
-        float(amount or 0)
-        for day, amount in zip(dates, amounts, strict=False)
-        if start_s <= day <= end_s
-    )
+    total = 0.0
+    matched = 0
+    for day in days:
+        raw = day.get("datetime")
+        if not raw:
+            raise requests.RequestException("visual crossing day missing datetime")
+        day_s = str(raw)[:10]
+        if start_s <= day_s <= end_s:
+            total += float(day.get("precip") or 0)
+            matched += 1
+
+    expected = (end - start).days + 1
+    if matched != expected:
+        logger.warning(
+            "visual_crossing returned %s days in window, expected %s",
+            matched,
+            expected,
+        )
+    return total
 
 
 def _tick(settings: Settings, state: State, apply) -> State:
