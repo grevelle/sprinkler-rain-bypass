@@ -76,18 +76,29 @@ def prompt_settings(base: Settings, prompter: Prompter) -> Settings:
     gpio = base.gpio
 
     typer.echo("\n==> Configuration (Enter accepts the default in brackets)\n")
-    typer.echo("==> Location (53029 Hartland, WI defaults — change if your controller is elsewhere)")
+    typer.echo(
+        "==> Location (53029 Hartland, WI defaults — change if your controller is elsewhere)"
+    )
     latitude = float(prompter.text("Latitude (decimal degrees)", default=str(loc.latitude)))
     longitude = float(prompter.text("Longitude (decimal degrees)", default=str(loc.longitude)))
     timezone = prompter.text("Timezone (IANA, e.g. America/Chicago)", default=loc.timezone)
 
     typer.echo("\n==> Watering thresholds (defaults match settings.example.toml)")
     inches_required = float(
-        prompter.text("Past window: block if total rain exceeds (inches)", default=str(w.inches_required))
+        prompter.text(
+            "Past window: block if total rain exceeds (inches)", default=str(w.inches_required)
+        )
     )
-    past_days = int(prompter.text("Past window: sum rain over this many days (through today)", default=str(w.past_days)))
+    past_days = int(
+        prompter.text(
+            "Past window: sum rain over this many days (through today)", default=str(w.past_days)
+        )
+    )
     forecast_days = int(
-        prompter.text("Forecast window: look ahead this many days (0 to disable)", default=str(w.forecast_days))
+        prompter.text(
+            "Forecast window: look ahead this many days (0 to disable)",
+            default=str(w.forecast_days),
+        )
     )
     forecast_inches_max = float(
         prompter.text(
@@ -108,28 +119,52 @@ def prompt_settings(base: Settings, prompter: Prompter) -> Settings:
         )
     )
     near_term_hours = int(
-        prompter.text("Block if rain exceeds threshold within this many hours (0 = off)", default=str(w.near_term_hours))
+        prompter.text(
+            "Block if rain exceeds threshold within this many hours (0 = off)",
+            default=str(w.near_term_hours),
+        )
     )
     near_term_inches_max = float(
-        prompter.text("Near-term window: block if total rain exceeds (inches)", default=str(w.near_term_inches_max))
+        prompter.text(
+            "Near-term window: block if total rain exceeds (inches)",
+            default=str(w.near_term_inches_max),
+        )
     )
     freeze_skip = _parse_bool(
-        prompter.text("Block when forecast low is below freeze temp (true/false)", default=str(w.freeze_skip).lower())
+        prompter.text(
+            "Block when forecast low is below freeze temp (true/false)",
+            default=str(w.freeze_skip).lower(),
+        )
     )
-    freeze_temp_f = float(prompter.text("Freeze skip threshold (Fahrenheit)", default=str(w.freeze_temp_f)))
+    freeze_temp_f = float(
+        prompter.text("Freeze skip threshold (Fahrenheit)", default=str(w.freeze_temp_f))
+    )
     check_hour = int(
-        prompter.text("Daily check hour, local time 0-23 (used when checks/day = 1)", default=str(w.check_hour))
+        prompter.text(
+            "Daily check hour, local time 0-23 (used when checks/day = 1)",
+            default=str(w.check_hour),
+        )
     )
     check_minute = int(prompter.text("Daily check minute 0-59", default=str(w.check_minute)))
     updates_per_day = int(
-        prompter.text("Weather checks per day (1 aligns to check hour above)", default=str(w.updates_per_day))
+        prompter.text(
+            "Weather checks per day (1 aligns to check hour above)", default=str(w.updates_per_day)
+        )
     )
 
-    typer.echo("\n==> Sewer lockout (blocks ALL watering in this window — adjust only if your city differs)")
+    typer.echo(
+        "\n==> Sewer lockout (blocks ALL watering in this window — adjust only if your city differs)"
+    )
     typer.echo("  City sewer charge is based on water use Jan 16–Mar 15 (April utility bill).")
-    sewer_start_month = int(prompter.text("Sewer lockout start month (1-12)", default=str(sewer.start_month)))
-    sewer_start_day = int(prompter.text("Sewer lockout start day (1-31)", default=str(sewer.start_day)))
-    sewer_end_month = int(prompter.text("Sewer lockout end month (1-12)", default=str(sewer.end_month)))
+    sewer_start_month = int(
+        prompter.text("Sewer lockout start month (1-12)", default=str(sewer.start_month))
+    )
+    sewer_start_day = int(
+        prompter.text("Sewer lockout start day (1-31)", default=str(sewer.start_day))
+    )
+    sewer_end_month = int(
+        prompter.text("Sewer lockout end month (1-12)", default=str(sewer.end_month))
+    )
     sewer_end_day = int(prompter.text("Sewer lockout end day (1-31)", default=str(sewer.end_day)))
 
     typer.echo("\n==> Visual Crossing API (free key: https://www.visualcrossing.com/weather-api)")
@@ -137,11 +172,18 @@ def prompt_settings(base: Settings, prompter: Prompter) -> Settings:
 
     typer.echo("\n==> GPIO pins (BCM numbering)")
     gpio_relay = int(prompter.text("Relay pin", default=str(gpio.relay)))
-    gpio_enabled = int(prompter.text("Green LED pin (watering allowed)", default=str(gpio.watering_enabled_led)))
-    gpio_disabled = int(prompter.text("Red LED pin (watering blocked)", default=str(gpio.watering_disabled_led)))
+    gpio_enabled = int(
+        prompter.text("Green LED pin (watering allowed)", default=str(gpio.watering_enabled_led))
+    )
+    gpio_disabled = int(
+        prompter.text("Red LED pin (watering blocked)", default=str(gpio.watering_disabled_led))
+    )
     mock_default = not is_raspberry_pi()
     if mock_default:
-        typer.secho("warning: Raspberry Pi not detected; defaulting gpio.mock=true for this machine.", fg=typer.colors.YELLOW)
+        typer.secho(
+            "warning: Raspberry Pi not detected; defaulting gpio.mock=true for this machine.",
+            fg=typer.colors.YELLOW,
+        )
     gpio_mock = _parse_bool(
         prompter.text("Use mock GPIO (no hardware)", default=str(mock_default).lower())
     )
@@ -236,7 +278,9 @@ def install_systemd_unit(
 ) -> None:
     runner: RunCommand = run_command or subprocess.run
     if shutil.which("systemctl") is None:
-        typer.secho("warning: systemctl not found; skipping service install.", fg=typer.colors.YELLOW)
+        typer.secho(
+            "warning: systemctl not found; skipping service install.", fg=typer.colors.YELLOW
+        )
         return
     if not prompter.confirm(f"Install and enable systemd service ({SERVICE_NAME})?", default=True):
         return
@@ -311,7 +355,9 @@ def run_install(
             raise typer.Exit(1) from exc
 
     if not skip_systemd:
-        install_systemd_unit(install_root, python, settings_path, prompter=prompts, run_command=run_command)
+        install_systemd_unit(
+            install_root, python, settings_path, prompter=prompts, run_command=run_command
+        )
 
     typer.echo("\n==> Done.")
     typer.echo(f"  Config:  {settings_path}")

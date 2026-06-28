@@ -197,9 +197,12 @@ def test_rain_delay_helpers(settings):
     assert update_blocked_until(
         today, past_ok_flag=False, rain_delay_days=1, blocked_until=date(2024, 6, 12)
     ) == date(2024, 6, 12)
-    assert update_blocked_until(
-        date(2024, 6, 13), past_ok_flag=True, rain_delay_days=1, blocked_until=date(2024, 6, 12)
-    ) is None
+    assert (
+        update_blocked_until(
+            date(2024, 6, 13), past_ok_flag=True, rain_delay_days=1, blocked_until=date(2024, 6, 12)
+        )
+        is None
+    )
     assert (
         update_blocked_until(
             today, past_ok_flag=True, rain_delay_days=0, blocked_until=date(2024, 6, 12)
@@ -482,9 +485,7 @@ def test_fetch_weather(settings, monkeypatch):
     url = timeline_url_for(settings, api_start, api_end)
     respx.get(url).mock(return_value=httpx.Response(200, json=payload))
     totals = fetch_weather(settings)
-    assert totals.past_inches == pytest.approx(
-        sum_precip(payload["days"], past_start, past_end)
-    )
+    assert totals.past_inches == pytest.approx(sum_precip(payload["days"], past_start, past_end))
     assert totals.forecast_inches == pytest.approx(
         sum_precip(payload["days"], forecast_start, forecast_end)
     )

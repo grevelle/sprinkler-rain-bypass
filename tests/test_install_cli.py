@@ -314,6 +314,7 @@ def test_run_install_api_failure(tmp_path, monkeypatch):
 def test_run_install_once_failure(tmp_path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+
     def _fail(*_args, **_kwargs):
         raise RuntimeError("cycle failed")
 

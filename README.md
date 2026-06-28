@@ -36,14 +36,14 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 ## Config (`settings.toml`)
 
 
-| Section    | Keys                                                                    |
-| ---------- | ----------------------------------------------------------------------- |
-| `location` | `latitude`, `longitude`, `timezone` (IANA name, e.g. `America/Chicago`) |
+| Section    | Keys                                                                                                                                                                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `location` | `latitude`, `longitude`, `timezone` (IANA name, e.g. `America/Chicago`)                                                                                                                                                               |
 | `watering` | `inches_required`, `past_days`, `forecast_days`, `forecast_inches_max`, `event_inches`, `rain_delay_days`, `near_term_hours`, `near_term_inches_max`, `freeze_skip`, `freeze_temp_f`, `check_hour`, `check_minute`, `updates_per_day` |
-| `sewer`    | `start_month/day`, `end_month/day` — hard block window (annual sewer cap) |
-| `weather`  | `api_key` (Visual Crossing Timeline API)                                |
-| `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`        |
-| `runtime`  | `state_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`       |
+| `sewer`    | `start_month/day`, `end_month/day` — hard block window (annual sewer cap)                                                                                                                                                             |
+| `weather`  | `api_key` (Visual Crossing Timeline API)                                                                                                                                                                                              |
+| `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`                                                                                                                                                                      |
+| `runtime`  | `state_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`                                                                                                                                                                     |
 
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
@@ -80,7 +80,20 @@ Watering is allowed only when **all** gates pass and no active rain delay remain
 
 ## Code
 
-Layered modules: `config`, `settings_io`, `windows`, `weather` (httpx), `logic`, `controller`, `gpio`, `cli`, and `install_cli`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs Ruff, Pyright (strict), ShellCheck, and pytest at 100% coverage on Python 3.11 and 3.12.
+Layered modules: `config`, `settings_io`, `windows`, `weather` (httpx), `logic`, `controller`, `gpio`, `cli`, and `install_cli`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs pre-commit, Pyright (strict), and pytest at 100% coverage on Python 3.11 and 3.12.
+
+## Development
+
+Install dev dependencies, then enable pre-commit hooks locally (Ruff, format, ShellCheck — same as CI). Pyright runs against the installed package:
+
+```bash
+pip install -e ".[dev,gpio]"
+pre-commit install
+pre-commit run --all-files   # optional: run once without committing
+pyright                      # strict typing on src/
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Hardware
 
@@ -92,17 +105,57 @@ Layered modules: `config`, `settings_io`, `windows`, `weather` (httpx), `logic`,
 - Green + red LED
 - Irrigation controller with rain-bypass input
 
-### Wiring (default BCM pins)
+### Wiring diagram (default BCM pins)
 
+Logic levels and pin numbers match `settings.example.toml`. Use **3.3 V** relay modules; many boards expose relay VCC on 5 V — check your module before wiring.
 
-| Signal    | Pin | Behavior                 |
-| --------- | --- | ------------------------ |
-| Relay     | 25  | HIGH = watering disabled |
-| Green LED | 4   | ON when watering allowed |
-| Red LED   | 27  | ON when watering blocked |
+```mermaid
+flowchart TB
+  subgraph pi [Raspberry Pi]
+    v33["3.3V"]
+    gnd["GND"]
+    gpio25["GPIO 25 — relay"]
+    gpio4["GPIO 4 — green LED"]
+    gpio27["GPIO 27 — red LED"]
+  end
 
+  subgraph relay [Relay module]
+    rVCC["VCC"]
+    rGND["GND"]
+    rIN["IN"]
+    rCOM["COM"]
+    rNO["NO"]
+  end
 
-Configure pins in `settings.toml` under `[gpio]`.
+  subgraph leds [Status LEDs via 220 Ω]
+    green["Green — watering allowed"]
+    red["Red — watering blocked"]
+  end
+
+  subgraph controller [Irrigation controller]
+    rainIn["Rain-bypass / sensor input"]
+    rainCommon["Common"]
+  end
+
+  v33 --> rVCC
+  gnd --> rGND
+  gpio25 --> rIN
+  rCOM --> rainCommon
+  rNO --> rainIn
+
+  gpio4 --> green
+  gpio27 --> red
+  green --> gnd
+  red --> gnd
+```
+
+| GPIO signal | Pin | When HIGH / ON |
+| ----------- | --- | -------------- |
+| Relay IN | 25 | Watering **disabled** (relay energized — verify against your controller) |
+| Green LED | 4 | Watering **allowed** |
+| Red LED | 27 | Watering **blocked** |
+
+Configure pins in `settings.toml` under `[gpio]`. Relay **COM/NO** (or your module’s dry-contact pair) goes to the controller’s rain-bypass terminals — same as a physical rain sensor would. Confirm whether your controller expects **normally open** or **normally closed** before leaving it unattended.
 
 ### Safety
 

@@ -208,9 +208,7 @@ def parse_vc_datetime(raw: str, timezone: str) -> datetime:
     return parsed.astimezone(tz)
 
 
-def freeze_block_for_days(
-    daily: list[Mapping[str, Any]], settings: Settings, today: date
-) -> bool:
+def freeze_block_for_days(daily: list[Mapping[str, Any]], settings: Settings, today: date) -> bool:
     if not settings.watering.freeze_skip:
         return False
     threshold = settings.watering.freeze_temp_f

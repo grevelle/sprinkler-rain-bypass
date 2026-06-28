@@ -17,7 +17,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev,gpio]"
-      - run: ruff check .
+      - run: pre-commit run --all-files
       - run: pyright
-      - run: shellcheck install.sh
       - run: pytest -q --cov-fail-under=100

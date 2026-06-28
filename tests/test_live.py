@@ -73,7 +73,7 @@ def _assert_days_contract(days: list[object]) -> None:
         assert "datetime" in day
         assert "precip" in day
         precip = day["precip"]
-        assert precip is None or isinstance(precip, (int, float))
+        assert precip is None or isinstance(precip, int | float)
         if precip is not None:
             assert precip >= 0.0
 

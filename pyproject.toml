@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5", "respx>=0.21", "ruff>=0.4", "pyright>=1.1"]
+dev = ["pytest>=8", "pytest-cov>=5", "respx>=0.21", "ruff>=0.4", "pyright>=1.1", "pre-commit>=4"]
 gpio = ["RPi.GPIO>=0.7; platform_system == 'Linux'"]
 
 [project.scripts]
