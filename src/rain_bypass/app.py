@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import argparse
 import logging
+import sys
 import time
 from datetime import date, timedelta
+from pathlib import Path
 
 import requests
 
-from rain_bypass.config import FailMode, FrozenModel, Season, Settings, State, local_today
+from rain_bypass.config import FailMode, Season, Settings, State, load_settings, local_today
 from rain_bypass.gpio import PinFactory, watering_pins
 
 logger = logging.getLogger(__name__)
@@ -16,77 +19,44 @@ FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
 
-class WeatherError(RuntimeError):
-    pass
-
-
-class Decision(FrozenModel):
-    watering_required: bool
-    rainfall_inches: float | None
-    in_season: bool
-    error: str | None = None
-
-
 def in_season(season: Season, today: date) -> bool:
     start = date(today.year, season.start_month, season.start_day)
     end = date(today.year, season.end_month, season.end_day)
     return start <= today <= end if start <= end else today >= start or today <= end
 
 
-def precip_window(settings: Settings) -> tuple[date, date]:
+def fetch_precip(settings: Settings) -> float:
     today = local_today(settings.location)
     days = settings.watering.past_days
-    return today - timedelta(days=days - 1), today
-
-
-def fetch_precip(settings: Settings) -> float:
-    start, end = precip_window(settings)
+    start, end = today - timedelta(days=days - 1), today
     loc = settings.location
     timeout = settings.runtime.weather_timeout_seconds
     daily = _open_meteo_daily(loc.latitude, loc.longitude, start, end, timeout)
-    inches = _sum_mm(daily, start, end) / MM_PER_INCH
-    logger.info(
-        "precipitation %.2f in over %s days (%s to %s)",
-        inches,
-        settings.watering.past_days,
-        start,
-        end,
-    )
-    return inches
+    return _sum_mm(daily, start, end) / MM_PER_INCH
 
 
-def decide(settings: Settings, state: State) -> Decision:
+def decide(settings: Settings, state: State) -> tuple[bool, float | None, bool, str | None]:
+    """Return (watering_required, rainfall_inches, in_season, error)."""
     if not in_season(settings.season, local_today(settings.location)):
-        logger.info("outside watering season")
-        return Decision(watering_required=False, rainfall_inches=None, in_season=False)
+        return False, None, False, None
 
     try:
         rainfall = fetch_precip(settings)
-    except WeatherError as exc:
+    except requests.RequestException as exc:
         logger.warning("weather failed; fail_mode=%s", settings.runtime.fail_mode)
-        return _fallback(settings, state, str(exc))
+        keep = (
+            settings.runtime.fail_mode is FailMode.KEEP_LAST_STATE
+            and state.watering_required is not None
+        )
+        return (
+            state.watering_required if keep else False,
+            state.rainfall_inches,
+            True,
+            str(exc),
+        )
 
     required = rainfall <= settings.watering.inches_required
-    logger.info(
-        "rainfall %.2f in (threshold %.2f in) -> watering %s",
-        rainfall,
-        settings.watering.inches_required,
-        "required" if required else "blocked",
-    )
-    return Decision(watering_required=required, rainfall_inches=rainfall, in_season=True)
-
-
-def _fallback(settings: Settings, state: State, message: str) -> Decision:
-    keep = (
-        settings.runtime.fail_mode is FailMode.KEEP_LAST_STATE
-        and state.watering_required is not None
-    )
-    return Decision(
-        watering_required=state.watering_required if keep else False,
-        rainfall_inches=state.rainfall_inches,
-        in_season=True,
-        error=message,
-    )
+    return required, rainfall, True, None
 
 
 def _open_meteo_daily(lat: float, lon: float, start: date, end: date, timeout: int) -> dict:
@@ -116,9 +86,9 @@ def _get(url: str, *, params: dict, timeout: int) -> dict:
         response = requests.get(url, params=params, timeout=timeout)
         response.raise_for_status()
         return response.json()
-    except requests.RequestException as exc:
+    except requests.RequestException:
         logger.warning("weather request failed")
-        raise WeatherError("weather request failed") from exc
+        raise
 
 
 def _sum_mm(daily: dict, start: date, end: date) -> float:
@@ -133,13 +103,13 @@ def _sum_mm(daily: dict, start: date, end: date) -> float:
 
 
 def _tick(settings: Settings, state: State, apply) -> State:
-    decision = decide(settings, state)
-    apply(decision.watering_required)
+    watering_required, rainfall_inches, _, error = decide(settings, state)
+    apply(watering_required)
     state = State(
         last_weather_update=time.time(),
-        watering_required=decision.watering_required,
-        rainfall_inches=decision.rainfall_inches,
-        last_error=decision.error,
+        watering_required=watering_required,
+        rainfall_inches=rainfall_inches,
+        last_error=error,
     )
     state.save(settings.runtime.state_path)
     return state
@@ -152,7 +122,33 @@ def run(settings: Settings, *, once: bool = False, pin_factory: PinFactory = wat
             _tick(settings, state, driver.apply)
             return
 
-        logger.info("starting loop (interval %.0fs)", settings.watering.interval_seconds)
         while True:
             state = _tick(settings, state, driver.apply)
             time.sleep(settings.watering.interval_seconds)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Sprinkler rain bypass controller")
+    parser.add_argument("-c", "--config", type=Path, default=Path("settings.toml"))
+    parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
+    args = parser.parse_args(argv)
+
+    settings = load_settings(args.config)
+    logging.basicConfig(
+        level=getattr(logging, settings.runtime.log_level, logging.INFO),
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+
+    try:
+        run(settings, once=args.once)
+    except KeyboardInterrupt:
+        logger.info("stopped")
+        return 0
+    except Exception:
+        logger.exception("fatal error")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

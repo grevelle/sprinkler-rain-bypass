@@ -45,20 +45,18 @@ class PiPins:
         self._gpio.cleanup()
 
 
-def _driver_for(gpio: Gpio) -> PinDriver:
-    if gpio.mock:
-        return MockPins()
-    try:
-        import RPi  # noqa: F401
-    except ImportError as exc:
-        raise RuntimeError("install [gpio] extra or set gpio.mock = true") from exc
-    return PiPins(gpio)
-
-
 @contextmanager
 def watering_pins(gpio: Gpio) -> Iterator[PinDriver]:
-    driver = _driver_for(gpio)
-    cleanup = getattr(driver, "cleanup", None)
+    if gpio.mock:
+        driver: PinDriver = MockPins()
+        cleanup = None
+    else:
+        try:
+            import RPi  # noqa: F401
+        except ImportError as exc:
+            raise RuntimeError("install [gpio] extra or set gpio.mock = true") from exc
+        driver = PiPins(gpio)
+        cleanup = driver.cleanup
     try:
         yield driver
     finally:

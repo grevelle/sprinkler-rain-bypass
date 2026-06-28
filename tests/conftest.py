@@ -1,8 +1,10 @@
 from pathlib import Path
+from types import ModuleType
+from unittest.mock import MagicMock
 
 import pytest
 
-from rain_bypass.config import load_settings
+from rain_bypass.config import Gpio, load_settings
 
 SETTINGS = """
 [location]
@@ -45,3 +47,25 @@ def settings_path(tmp_path: Path) -> Path:
 @pytest.fixture
 def settings(settings_path: Path):
     return load_settings(settings_path)
+
+
+@pytest.fixture
+def fake_rpi():
+    fake_gpio = ModuleType("RPi.GPIO")
+    fake_gpio.BCM = "BCM"
+    fake_gpio.OUT = "OUT"
+    fake_gpio.HIGH = 1
+    fake_gpio.LOW = 0
+    fake_gpio.setmode = MagicMock()
+    fake_gpio.setwarnings = MagicMock()
+    fake_gpio.setup = MagicMock()
+    fake_gpio.output = MagicMock()
+    fake_gpio.cleanup = MagicMock()
+    fake_rpi = ModuleType("RPi")
+    fake_rpi.GPIO = fake_gpio
+    return fake_rpi, fake_gpio
+
+
+@pytest.fixture
+def pi_gpio():
+    return Gpio(relay=25, watering_enabled_led=4, watering_disabled_led=27, mock=False)
