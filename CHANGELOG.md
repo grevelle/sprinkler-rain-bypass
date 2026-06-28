@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Default `weather_timeout_seconds` increased to **45** for slow Pi Zero W Wi‑Fi.
 - Installer uses `settings.example.toml` defaults, resolves **ZIP code → location** via Visual Crossing, and only requires the **API key**; other confirms default to yes on Enter.
+- CI uses `actions/checkout@v6` and `actions/setup-python@v6` (Node.js 24) to clear runner deprecation warnings.
 
 ## [4.0.0] - 2025-06-27
 
