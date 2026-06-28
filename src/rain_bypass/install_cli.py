@@ -239,9 +239,13 @@ def prompt_settings(base: Settings, prompter: Prompter) -> Settings:
     )
 
 
+def _is_posix() -> bool:
+    return os.name == "posix"
+
+
 def write_settings_secure(path: Path, settings: Settings) -> None:
     write_settings(path, settings)
-    if os.name == "posix":
+    if _is_posix():
         os.chmod(path, 0o600)
 
 

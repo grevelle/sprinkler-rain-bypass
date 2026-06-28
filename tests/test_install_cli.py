@@ -201,7 +201,7 @@ def test_install_systemd_unit_prompts_for_pi_user(monkeypatch):
 def test_write_settings_secure_chmod(tmp_path, monkeypatch):
     chmod_calls: list[tuple[Path, int]] = []
 
-    monkeypatch.setattr("rain_bypass.install_cli.os.name", "posix")
+    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
     monkeypatch.setattr(
         "rain_bypass.install_cli.os.chmod",
         lambda path, mode: chmod_calls.append((path, mode)),
@@ -214,7 +214,7 @@ def test_write_settings_secure_chmod(tmp_path, monkeypatch):
 def test_write_settings_secure_skips_chmod_on_non_posix(tmp_path, monkeypatch):
     chmod_calls: list[tuple[Path, int]] = []
 
-    monkeypatch.setattr("rain_bypass.install_cli.os.name", "nt")
+    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: False)
     monkeypatch.setattr(
         "rain_bypass.install_cli.os.chmod",
         lambda path, mode: chmod_calls.append((path, mode)),
