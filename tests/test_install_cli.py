@@ -15,6 +15,7 @@ from rain_bypass.install_cli import (
     app,
     install_systemd_unit,
     is_raspberry_pi,
+    is_pi_zero,
     main,
     prompt_settings,
     repo_root,
@@ -88,6 +89,20 @@ def test_is_raspberry_pi_not_pi(monkeypatch, tmp_path):
     assert is_raspberry_pi() is False
 
 
+def test_is_pi_zero(monkeypatch, tmp_path):
+    model = tmp_path / "model"
+    model.write_text("Raspberry Pi Zero W Rev 1.1", encoding="utf-8")
+    original_path = Path
+
+    def fake_path(value: str | Path) -> Path:
+        if str(value) == "/proc/device-tree/model":
+            return model
+        return original_path(value)
+
+    monkeypatch.setattr("rain_bypass.install_cli.Path", fake_path)
+    assert is_pi_zero() is True
+
+
 def test_systemd_unit():
     text = systemd_unit(
         Path("/opt/app"),
@@ -97,6 +112,7 @@ def test_systemd_unit():
     )
     assert "WorkingDirectory=/opt/app" in text
     assert "User=root" in text
+    assert "MemoryMax=256M" in text
 
 
 def test_prompt_settings_builds_toml(tmp_path, monkeypatch):
@@ -234,6 +250,20 @@ def test_run_install_skip_api_test(tmp_path, monkeypatch):
         skip_once=True,
         skip_api_test=True,
     )
+
+
+def test_run_install_pi_zero_notice(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("rain_bypass.install_cli.is_pi_zero", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    prompter = FakePrompter(secrets=["live-key"], confirms=[True, False, False])
+    run_install(
+        tmp_path,
+        prompter=prompter,
+        skip_systemd=True,
+        skip_once=True,
+        skip_api_test=True,
+    )
+    assert "Pi Zero detected" in capsys.readouterr().out
 
 
 def test_run_install_runs_once_successfully(tmp_path, monkeypatch):

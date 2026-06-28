@@ -39,6 +39,8 @@ def run(
     wait = seconds_until_check or seconds_until_next_check
     state = State.load(settings.runtime.state_path)
     with pin_factory(settings.gpio) as driver:
+        initial = state.watering_required if state.watering_required is not None else False
+        driver.apply(initial)
         if once:
             tick(settings, state, driver.apply)
             return

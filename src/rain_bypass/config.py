@@ -72,7 +72,7 @@ class Runtime(FrozenModel):
     state_path: Path = Path("state.json")
     fail_mode: FailMode = FailMode.DISABLE_WATERING
     log_level: str = "INFO"
-    weather_timeout_seconds: int = Field(default=30, ge=1)
+    weather_timeout_seconds: int = Field(default=45, ge=1)
 
     @field_validator("log_level")
     @classmethod

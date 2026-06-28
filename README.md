@@ -2,11 +2,13 @@
 
 Raspberry Pi controller that checks recent rainfall (Visual Crossing) and drives a relay plus status LEDs for your irrigation rain-bypass input.
 
+**Target hardware:** Raspberry Pi Zero W (also works on other Pi models with BCM GPIO).
+
 Get a free API key at [Visual Crossing](https://www.visualcrossing.com/weather-api).
 
 ## Setup
 
-On a Raspberry Pi (or Linux), run the interactive installer — it creates a venv, prompts for all settings, validates your API key, and optionally installs systemd:
+On a **Raspberry Pi Zero W**, use **Raspberry Pi OS Bookworm** (32-bit is fine) so you get **Python 3.11+**. Run the interactive installer — it creates a venv, prompts for all settings, validates your API key, and optionally installs systemd:
 
 ```bash
 git clone https://github.com/grevelle/sprinkler-rain-bypass.git
@@ -23,6 +25,19 @@ cp settings.example.toml settings.toml   # edit coordinates, pins, API key
 ```
 
 `settings.example.toml` is the canonical default config. Tests and `rain_bypass.settings_io` derive settings from it. Run `./install.sh` (or `rain-bypass-install`) for the interactive setup wizard.
+
+### Pi Zero W notes
+
+| Topic | Recommendation |
+| ----- | -------------- |
+| OS | Raspberry Pi OS **Bookworm** (Bullseye’s Python 3.9 is too old) |
+| First install | `./install.sh` on a Zero W can take **10–20 minutes** (slow CPU + SD card) |
+| Wi‑Fi | Stable connection required for Visual Crossing; default API timeout is **45 s** |
+| GPIO library | **`RPi.GPIO`** — correct for Zero W’s classic BCM2835 GPIO |
+| Relay module | **3.3 V** logic (see Hardware below) |
+| systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
+
+On boot the relay **blocks watering** until the first check completes, then restores the last saved state from `state.json` while fetching weather.
 
 ## Run
 
@@ -99,7 +114,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ### Parts
 
-- Raspberry Pi with network access
+- **Raspberry Pi Zero W** (or any Pi with network access and BCM GPIO)
 - GPIO breakout or breadboard
 - 2× resistors (50–300 Ω), 1× 3.3 V relay module
 - Green + red LED

@@ -763,7 +763,57 @@ def test_pi_pins(fake_rpi, pi_gpio):
         driver.apply(False)
         driver.cleanup()
         assert fake_gpio.setup.call_count == 3
-        assert fake_gpio.output.call_count == 6
+        assert fake_gpio.output.call_count == 9
+
+
+def test_run_applies_cached_state_before_tick(tmp_path, settings_path, monkeypatch):
+    calls: list[bool] = []
+
+    @contextmanager
+    def tracking_pins(_gpio):
+        class Driver:
+            def apply(self, watering_required: bool) -> None:
+                calls.append(watering_required)
+
+        yield Driver()
+
+    state_path = tmp_path / "state.json"
+    settings_path.write_text(
+        settings_path.read_text(encoding="utf-8").replace(
+            'state_path = "state.json"', f'state_path = "{state_path.as_posix()}"'
+        ),
+        encoding="utf-8",
+    )
+    settings = load_settings(settings_path)
+    State(watering_required=True).save(state_path)
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0))
+    run(settings, once=True, pin_factory=tracking_pins)
+    assert calls[0] is True
+    assert calls[-1] is True
+
+
+def test_run_applies_fail_safe_when_no_cached_state(tmp_path, settings_path, monkeypatch):
+    calls: list[bool] = []
+
+    @contextmanager
+    def tracking_pins(_gpio):
+        class Driver:
+            def apply(self, watering_required: bool) -> None:
+                calls.append(watering_required)
+
+        yield Driver()
+
+    state_path = tmp_path / "state.json"
+    settings_path.write_text(
+        settings_path.read_text(encoding="utf-8").replace(
+            'state_path = "state.json"', f'state_path = "{state_path.as_posix()}"'
+        ),
+        encoding="utf-8",
+    )
+    settings = load_settings(settings_path)
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0))
+    run(settings, once=True, pin_factory=tracking_pins)
+    assert calls[0] is False
 
 
 def test_watering_pins_requires_gpio_extra(pi_gpio):

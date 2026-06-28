@@ -48,4 +48,4 @@ mock = false
 state_path = "state.json"
 fail_mode = "disable_watering"
 log_level = "INFO"
-weather_timeout_seconds = 30
+weather_timeout_seconds = 45

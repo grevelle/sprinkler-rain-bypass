@@ -49,11 +49,25 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def is_raspberry_pi() -> bool:
+def read_pi_model() -> str | None:
     model = Path("/proc/device-tree/model")
     if not model.is_file():
+        return None
+    return model.read_text(encoding="utf-8", errors="ignore").strip("\0")
+
+
+def is_raspberry_pi() -> bool:
+    model = read_pi_model()
+    if model is None:
         return False
-    return "raspberry" in model.read_text(encoding="utf-8", errors="ignore").lower()
+    return "raspberry" in model.lower()
+
+
+def is_pi_zero() -> bool:
+    model = read_pi_model()
+    if model is None:
+        return False
+    return "zero" in model.lower()
 
 
 def validate_api_key(key: str) -> str:
@@ -266,6 +280,10 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart={python_s} -m rain_bypass --config {settings_s}
 Restart=on-failure
 RestartSec=300
+# Pi Zero W (512 MB RAM): cap this service and deprioritize vs other workloads.
+MemoryMax=256M
+Nice=5
+TimeoutStartSec=120
 
 [Install]
 WantedBy=multi-user.target
@@ -326,6 +344,11 @@ def run_install(
 
     typer.echo("Sprinkler Rain Bypass — installer")
     typer.echo(f"Install directory: {install_root}\n")
+    if is_pi_zero():
+        typer.secho(
+            "Pi Zero detected — first pip install can take 10–20 minutes on a slow SD card.",
+            fg=typer.colors.YELLOW,
+        )
 
     settings = prompt_settings(defaults, prompts)
 

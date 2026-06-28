@@ -9,8 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `CHANGELOG.md` and a wiring diagram in the README.
-- Pre-commit (Ruff, format, ShellCheck) in CI; local setup documented under **Development**.
+- Pi Zero W tuning: safe GPIO boot state, systemd memory cap, installer/SD-card pip flags, README platform notes.
+
+### Changed
+
+- Default `weather_timeout_seconds` increased to **45** for slow Pi Zero W Wi‑Fi.
 
 ## [4.0.0] - 2025-06-27
 

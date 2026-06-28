@@ -38,6 +38,8 @@ class PiPins:
         GPIO.setwarnings(False)
         for pin in (gpio.relay, gpio.watering_enabled_led, gpio.watering_disabled_led):
             GPIO.setup(pin, GPIO.OUT)
+        # Fail-safe before the first weather fetch (Pi boot can take seconds on slow Wi-Fi).
+        self.apply(False)
 
     def apply(self, watering_required: bool) -> None:
         g, p = self._gpio, self._pins
