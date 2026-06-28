@@ -1,87 +1,74 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from typing import Iterator, Protocol
 
-from rain_bypass.models import GpioSettings
+from rain_bypass.config import Gpio
 
 logger = logging.getLogger(__name__)
 
 
-class GpioController(ABC):
-    @abstractmethod
-    def setup(self, settings: GpioSettings) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def apply(self, watering_required: bool) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def cleanup(self) -> None:
-        raise NotImplementedError
+class PinDriver(Protocol):
+    def setup(self, gpio: Gpio) -> None: ...
+    def apply(self, watering_required: bool) -> None: ...
+    def cleanup(self) -> None: ...
 
 
-class MockGpioController(GpioController):
-    def setup(self, settings: GpioSettings) -> None:
-        self._settings = settings
-        logger.info(
-            "Mock GPIO initialized (relay=%s, green=%s, red=%s)",
-            settings.relay,
-            settings.watering_enabled_led,
-            settings.watering_disabled_led,
-        )
+class MockPins:
+    def setup(self, gpio: Gpio) -> None:
+        logger.info("mock gpio relay=%s green=%s red=%s", gpio.relay, gpio.watering_enabled_led, gpio.watering_disabled_led)
 
     def apply(self, watering_required: bool) -> None:
-        if watering_required:
-            logger.info("Mock GPIO: relay OFF, green ON, red OFF (watering enabled)")
-        else:
-            logger.info("Mock GPIO: relay ON, green OFF, red ON (watering disabled)")
+        state = "enabled" if watering_required else "disabled"
+        logger.info("mock gpio watering %s", state)
 
     def cleanup(self) -> None:
-        logger.info("Mock GPIO cleanup")
+        logger.info("mock gpio cleanup")
 
 
-class RaspberryPiGpioController(GpioController):
-    def setup(self, settings: GpioSettings) -> None:
+class PiPins:
+    def setup(self, gpio: Gpio) -> None:
         import RPi.GPIO as GPIO
 
-        self._gpio = GPIO
-        self._settings = settings
+        self.gpio = GPIO
+        self.pins = gpio
         GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
-        GPIO.setup(settings.relay, GPIO.OUT)
-        GPIO.setup(settings.watering_enabled_led, GPIO.OUT)
-        GPIO.setup(settings.watering_disabled_led, GPIO.OUT)
-        logger.info("GPIO pins configured")
+        for pin in (gpio.relay, gpio.watering_enabled_led, gpio.watering_disabled_led):
+            GPIO.setup(pin, GPIO.OUT)
 
     def apply(self, watering_required: bool) -> None:
-        gpio = self._gpio
-        settings = self._settings
+        g, p = self.gpio, self.pins
+        on, off = g.HIGH, g.LOW
         if watering_required:
-            gpio.output(settings.relay, gpio.LOW)
-            gpio.output(settings.watering_enabled_led, gpio.HIGH)
-            gpio.output(settings.watering_disabled_led, gpio.LOW)
+            g.output(p.relay, off)
+            g.output(p.watering_enabled_led, on)
+            g.output(p.watering_disabled_led, off)
         else:
-            gpio.output(settings.relay, gpio.HIGH)
-            gpio.output(settings.watering_enabled_led, gpio.LOW)
-            gpio.output(settings.watering_disabled_led, gpio.HIGH)
+            g.output(p.relay, on)
+            g.output(p.watering_enabled_led, off)
+            g.output(p.watering_disabled_led, on)
 
     def cleanup(self) -> None:
-        self._gpio.cleanup()
-        logger.info("GPIO cleanup complete")
+        self.gpio.cleanup()
 
 
-def build_gpio_controller(settings: GpioSettings) -> GpioController:
-    if settings.mock:
-        return MockGpioController()
-
+def pin_driver(gpio: Gpio) -> PinDriver:
+    if gpio.mock:
+        return MockPins()
     try:
         import RPi  # noqa: F401
     except ImportError as exc:
-        raise RuntimeError(
-            "RPi.GPIO is not installed. Install with `pip install sprinkler-rain-bypass[gpio]` "
-            "or set gpio.mock = true for development."
-        ) from exc
+        raise RuntimeError("install [gpio] extra or set gpio.mock = true") from exc
+    return PiPins()
 
-    return RaspberryPiGpioController()
+
+@contextmanager
+def watering_pins(gpio: Gpio) -> Iterator[PinDriver]:
+    driver = pin_driver(gpio)
+    driver.setup(gpio)
+    try:
+        yield driver
+    finally:
+        driver.cleanup()

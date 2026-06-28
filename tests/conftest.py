@@ -2,14 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from rain_bypass.config import load_settings
+from rain_bypass.config import ConfigError, FailMode, Provider, load_settings
 
-
-@pytest.fixture
-def example_config(tmp_path: Path) -> Path:
-    config = tmp_path / "settings.toml"
-    config.write_text(
-        """
+SETTINGS = """
 [location]
 latitude = 41.8781
 longitude = -87.6298
@@ -40,7 +35,16 @@ mock = true
 state_path = "state.json"
 fail_mode = "disable_watering"
 log_level = "INFO"
-""".strip(),
-        encoding="utf-8",
-    )
-    return config
+"""
+
+
+@pytest.fixture
+def settings_path(tmp_path: Path) -> Path:
+    path = tmp_path / "settings.toml"
+    path.write_text(SETTINGS.strip(), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def settings(settings_path: Path):
+    return load_settings(settings_path)

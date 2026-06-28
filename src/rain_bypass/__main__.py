@@ -5,48 +5,29 @@ import logging
 import sys
 from pathlib import Path
 
+from rain_bypass.app import run
 from rain_bypass.config import load_settings
-from rain_bypass.logging_setup import configure_logging
-from rain_bypass.runner import RainBypassRunner
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="rain-bypass",
-        description="Control a sprinkler rain bypass relay from recent precipitation data.",
-    )
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=Path,
-        default=Path("settings.toml"),
-        help="Path to settings TOML file (default: settings.toml)",
-    )
-    parser.add_argument(
-        "--once",
-        action="store_true",
-        help="Run a single evaluation cycle and exit (useful for testing).",
-    )
-    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = argparse.ArgumentParser(description="Sprinkler rain bypass controller")
+    parser.add_argument("-c", "--config", type=Path, default=Path("settings.toml"))
+    parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
+    args = parser.parse_args(argv)
+
     settings = load_settings(args.config)
-    configure_logging(settings.runtime.log_level)
-    logger = logging.getLogger(__name__)
+    logging.basicConfig(
+        level=getattr(logging, settings.runtime.log_level, logging.INFO),
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
 
     try:
-        runner = RainBypassRunner(settings)
-        if args.once:
-            runner.run_once()
-        else:
-            runner.run_forever()
+        run(settings, once=args.once)
     except KeyboardInterrupt:
-        logger.info("Stopped by user")
+        logging.getLogger(__name__).info("stopped")
         return 0
     except Exception:
-        logger.exception("Rain bypass exited due to an unhandled error")
+        logging.getLogger(__name__).exception("fatal error")
         return 1
     return 0
 

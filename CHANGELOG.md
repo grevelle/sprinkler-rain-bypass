@@ -1,4 +1,11 @@
-# Sprinkler Rain Bypass v2
+# Sprinkler Rain Bypass
+
+## 2.1.0
+
+- Collapse package to five modules: `config`, `weather`, `gpio`, `app`, `__main__`
+- Pydantic validation replaces hand-written config parsing
+- Python 3.11+; drop `tomli` and nested dataclass boilerplate
+- Merge decision loop, state, and runner into `app.run()`
 
 ## 2.0.0
 
