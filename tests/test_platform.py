@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from rain_bypass.platform import is_pi_zero, is_raspberry_pi, read_pi_model
 
 
