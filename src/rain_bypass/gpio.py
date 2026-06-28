@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib
 import logging
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
+from types import ModuleType
 from typing import Protocol
 
 from rain_bypass.config import Gpio
@@ -20,6 +22,10 @@ PinFactory = Callable[[Gpio], AbstractContextManager[PinDriver]]
 class MockPins:
     def apply(self, watering_required: bool) -> None:
         logger.info("mock gpio watering %s", "enabled" if watering_required else "disabled")
+
+
+def _import_rpi_gpio() -> ModuleType:
+    return importlib.import_module("RPi.GPIO")
 
 
 class PiPins:
@@ -52,9 +58,7 @@ def watering_pins(gpio: Gpio) -> Generator[PinDriver, None, None]:
         cleanup = None
     else:
         try:
-            import importlib
-
-            importlib.import_module("RPi.GPIO")
+            _import_rpi_gpio()
         except ImportError as exc:
             raise RuntimeError("install [gpio] extra or set gpio.mock = true") from exc
         driver = PiPins(gpio)

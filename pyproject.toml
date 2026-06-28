@@ -38,7 +38,12 @@ rain_bypass = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-m 'not live' --cov=rain_bypass --cov-report=term-missing --cov-fail-under=100"
+addopts = [
+    "-m", "not live",
+    "--cov=rain_bypass",
+    "--cov-report=term-missing",
+    "--cov-fail-under=100",
+]
 markers = [
     "live: integration tests against the live Visual Crossing API (requires VISUAL_CROSSING_API_KEY)",
 ]

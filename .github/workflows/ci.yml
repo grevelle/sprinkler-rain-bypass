@@ -19,4 +19,4 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pre-commit run --all-files
       - run: pyright
-      - run: pytest -q --cov-fail-under=100
+      - run: pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100
