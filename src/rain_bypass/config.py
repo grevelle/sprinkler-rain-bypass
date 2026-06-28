@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import tomllib
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -48,17 +48,9 @@ class Watering(FrozenModel):
         return 86400 / self.updates_per_day
 
 
-class Season(FrozenModel):
-    start_month: int = Field(ge=1, le=12)
-    start_day: int = Field(ge=1, le=31)
-    end_month: int = Field(ge=1, le=12)
-    end_day: int = Field(ge=1, le=31)
-
-
-class SewerBaseline(FrozenModel):
+class SewerLockout(FrozenModel):
     """Hard block window — city sewer bills often use winter water use as the annual cap."""
 
-    protect: bool = Field(default=True)
     start_month: int = Field(default=1, ge=1, le=12)
     start_day: int = Field(default=16, ge=1, le=31)
     end_month: int = Field(default=3, ge=1, le=12)
@@ -91,8 +83,7 @@ class Runtime(FrozenModel):
 class Settings(FrozenModel):
     location: Location
     watering: Watering
-    season: Season
-    sewer: SewerBaseline = Field(default_factory=SewerBaseline)
+    sewer: SewerLockout = Field(default_factory=SewerLockout)
     weather: Weather
     gpio: Gpio
     runtime: Runtime
@@ -120,52 +111,10 @@ def local_today(location: Location) -> date:
     return datetime.now(ZoneInfo(location.timezone)).date()
 
 
-def in_date_window(
-    start_month: int,
-    start_day: int,
-    end_month: int,
-    end_day: int,
-    today: date,
-) -> bool:
-    start = date(today.year, start_month, start_day)
-    end = date(today.year, end_month, end_day)
-    return start <= today <= end if start <= end else today >= start or today <= end
-
-
-def in_season(season: Season, today: date) -> bool:
-    return in_date_window(
-        season.start_month,
-        season.start_day,
-        season.end_month,
-        season.end_day,
-        today,
-    )
-
-
-def in_sewer_baseline_window(sewer: SewerBaseline, today: date) -> bool:
-    if not sewer.protect:
-        return False
-    return in_date_window(
-        sewer.start_month,
-        sewer.start_day,
-        sewer.end_month,
-        sewer.end_day,
-        today,
-    )
-
-
-def sewer_overlaps_season(sewer: SewerBaseline, season: Season) -> bool:
-    if not sewer.protect:
-        return False
-    year = 2024
-    start = date(year, sewer.start_month, sewer.start_day)
-    end = date(year, sewer.end_month, sewer.end_day)
-    cursor = start
-    while cursor <= end:
-        if in_season(season, cursor.replace(year=year)):
-            return True
-        cursor += timedelta(days=1)
-    return False
+def in_sewer_lockout(sewer: SewerLockout, today: date) -> bool:
+    start = date(today.year, sewer.start_month, sewer.start_day)
+    end = date(today.year, sewer.end_month, sewer.end_day)
+    return start <= today <= end
 
 
 def load_settings(config_path: Path | str) -> Settings:
@@ -180,13 +129,6 @@ def load_settings(config_path: Path | str) -> Settings:
             raise ConfigError(str(exc)) from exc
 
     try:
-        settings = Settings.model_validate(data)
+        return Settings.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
-
-    if sewer_overlaps_season(settings.sewer, settings.season):
-        raise ConfigError(
-            "season overlaps sewer baseline window (default Jan 16–Mar 15); "
-            "irrigation during that period inflates annual sewer charges"
-        )
-    return settings

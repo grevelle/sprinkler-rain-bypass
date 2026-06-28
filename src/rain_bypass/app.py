@@ -15,8 +15,7 @@ from rain_bypass.config import (
     FailMode,
     Settings,
     State,
-    in_season,
-    in_sewer_baseline_window,
+    in_sewer_lockout,
     load_settings,
     local_today,
 )
@@ -38,8 +37,12 @@ class WeatherSnapshot(NamedTuple):
     freeze_block: bool
 
 
-# Backward-compatible alias for tests and callers expecting precip totals only.
-PrecipTotals = WeatherSnapshot
+class Decision(NamedTuple):
+    watering_required: bool
+    past_inches: float | None
+    forecast_inches: float | None
+    blocked_until: date | None
+    error: str | None
 
 
 def past_window(settings: Settings) -> tuple[date, date]:
@@ -62,11 +65,6 @@ def timeline_window(settings: Settings) -> tuple[date, date]:
     if forecast is None:
         return past_start, past_end
     return past_start, forecast[1]
-
-
-def precip_window(settings: Settings) -> tuple[date, date]:
-    """Past lookback window (backward compatible alias)."""
-    return past_window(settings)
 
 
 def local_now(settings: Settings, now: datetime | None = None) -> datetime:
@@ -162,10 +160,6 @@ def seconds_until_next_check(settings: Settings, *, now: datetime | None = None)
     return (target - current).total_seconds()
 
 
-def fetch_precip(settings: Settings) -> WeatherSnapshot:
-    return fetch_weather(settings)
-
-
 def fetch_weather(settings: Settings, *, now: datetime | None = None) -> WeatherSnapshot:
     api_start, api_end = timeline_window(settings)
     past_start, past_end = past_window(settings)
@@ -173,11 +167,9 @@ def fetch_weather(settings: Settings, *, now: datetime | None = None) -> Weather
     loc = settings.location
     timeout = settings.runtime.weather_timeout_seconds
     payload = _get_timeline(
-        loc.latitude,
-        loc.longitude,
+        settings,
         api_start,
         api_end,
-        settings=settings,
         api_key=settings.weather.api_key,
         timeout=timeout,
     )
@@ -240,26 +232,19 @@ def fetch_weather(settings: Settings, *, now: datetime | None = None) -> Weather
     )
 
 
-def decide(
-    settings: Settings, state: State
-) -> tuple[bool, float | None, float | None, date | None, bool, str | None]:
-    """Return (watering_required, past_inches, forecast_inches, blocked_until, in_season, error)."""
+def decide(settings: Settings, state: State) -> Decision:
     today = local_today(settings.location)
 
-    if in_sewer_baseline_window(settings.sewer, today):
+    if in_sewer_lockout(settings.sewer, today):
         sewer = settings.sewer
         logger.info(
-            "sewer baseline window (%02d/%02d-%02d/%02d); "
-            "watering blocked to protect annual sewer cap",
+            "sewer lockout (%02d/%02d-%02d/%02d); watering blocked to protect annual sewer cap",
             sewer.start_month,
             sewer.start_day,
             sewer.end_month,
             sewer.end_day,
         )
-        return False, None, None, state.blocked_until, False, None
-
-    if not in_season(settings.season, today):
-        return False, None, None, state.blocked_until, False, None
+        return Decision(False, None, None, state.blocked_until, None)
 
     blocked_until = state.blocked_until
 
@@ -271,12 +256,12 @@ def decide(
             settings.runtime.fail_mode is FailMode.KEEP_LAST_STATE
             and state.watering_required is not None
         )
-        return (
-            state.watering_required if keep else False,
+        watering = False if not keep else bool(state.watering_required)
+        return Decision(
+            watering,
             state.rainfall_inches,
             state.forecast_inches,
             blocked_until,
-            True,
             str(exc),
         )
 
@@ -295,25 +280,47 @@ def decide(
         )
     if blocked_until and today <= blocked_until and weather_allow:
         logger.info("rain delay active through %s; watering blocked", blocked_until)
-    return required, snapshot.past_inches, snapshot.forecast_inches, blocked_until, True, None
+    return Decision(
+        required,
+        snapshot.past_inches,
+        snapshot.forecast_inches,
+        blocked_until,
+        None,
+    )
 
 
-def _timeline_url(lat: float, lon: float, start: date, end: date) -> str:
-    return f"{VISUAL_CROSSING}/{lat},{lon}/{start}/{end}"
+def timeline_url_for(settings: Settings, start: date, end: date) -> str:
+    loc = settings.location
+    return f"{VISUAL_CROSSING}/{loc.latitude},{loc.longitude}/{start}/{end}"
+
+
+def timeline_request_params(settings: Settings) -> dict:
+    return {"key": settings.weather.api_key, **timeline_params(settings)}
+
+
+def weather_api_smoke(settings: Settings) -> str:
+    past_start, past_end = past_window(settings)
+    api_start, api_end = timeline_window(settings)
+    snapshot = fetch_weather(settings)
+    w = settings.watering
+    return (
+        f"API OK: past {snapshot.past_inches:.2f} in ({past_start} to {past_end}), "
+        f"forecast {snapshot.forecast_inches:.2f} in, "
+        f"near_term {snapshot.near_term_inches:.2f} in / {w.near_term_hours}h, "
+        f"freeze_block={snapshot.freeze_block} (timeline {api_start} to {api_end})"
+    )
 
 
 def _get_timeline(
-    lat: float,
-    lon: float,
+    settings: Settings,
     start: date,
     end: date,
     *,
-    settings: Settings,
     api_key: str,
     timeout: int,
 ) -> dict:
     return _get(
-        _timeline_url(lat, lon, start, end),
+        timeline_url_for(settings, start, end),
         params={**timeline_params(settings), "key": api_key},
         timeout=timeout,
     )
@@ -410,57 +417,51 @@ def _sum_precip_hours(hours: list, start: datetime, end: datetime, timezone: str
     return total
 
 
-def _max_daily_precip(days: list, start: date, end: date) -> float:
-    start_s, end_s = start.isoformat(), end.isoformat()
-    peak = 0.0
-    for day in days:
-        raw = day.get("datetime")
-        if not raw:
-            continue
-        day_s = str(raw)[:10]
-        if start_s <= day_s <= end_s:
-            peak = max(peak, float(day.get("precip") or 0))
-    return peak
-
-
-def _sum_precip(days: list, start: date, end: date) -> float:
+def _daily_precip_values(days: list, start: date, end: date, *, strict: bool = True) -> list[float]:
     if not days:
         raise requests.RequestException("visual crossing returned no daily rows")
 
     start_s, end_s = start.isoformat(), end.isoformat()
-    total = 0.0
-    matched = 0
+    values: list[float] = []
     for day in days:
         raw = day.get("datetime")
         if not raw:
-            raise requests.RequestException("visual crossing day missing datetime")
+            if strict:
+                raise requests.RequestException("visual crossing day missing datetime")
+            continue
         day_s = str(raw)[:10]
         if start_s <= day_s <= end_s:
-            total += float(day.get("precip") or 0)
-            matched += 1
+            values.append(float(day.get("precip") or 0))
+    return values
 
+
+def _max_daily_precip(days: list, start: date, end: date) -> float:
+    values = _daily_precip_values(days, start, end, strict=False)
+    return max(values) if values else 0.0
+
+
+def _sum_precip(days: list, start: date, end: date) -> float:
+    values = _daily_precip_values(days, start, end)
     expected = (end - start).days + 1
-    if matched != expected:
+    if len(values) != expected:
         logger.warning(
             "visual_crossing returned %s days in window, expected %s",
-            matched,
+            len(values),
             expected,
         )
-    return total
+    return sum(values)
 
 
 def _tick(settings: Settings, state: State, apply) -> State:
-    watering_required_flag, rainfall_inches, forecast_inches, blocked_until, _, error = decide(
-        settings, state
-    )
-    apply(watering_required_flag)
+    decision = decide(settings, state)
+    apply(decision.watering_required)
     state = State(
         last_weather_update=time.time(),
-        watering_required=watering_required_flag,
-        rainfall_inches=rainfall_inches,
-        forecast_inches=forecast_inches,
-        blocked_until=blocked_until,
-        last_error=error,
+        watering_required=decision.watering_required,
+        rainfall_inches=decision.past_inches,
+        forecast_inches=decision.forecast_inches,
+        blocked_until=decision.blocked_until,
+        last_error=decision.error,
     )
     state.save(settings.runtime.state_path)
     return state

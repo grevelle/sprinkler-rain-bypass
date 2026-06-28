@@ -5,62 +5,20 @@ from unittest.mock import MagicMock
 import pytest
 
 from rain_bypass.config import Gpio, load_settings
+from rain_bypass.settings_io import load_example_settings, write_settings
 
-SETTINGS = """
-[location]
-latitude = 43.106
-longitude = -88.351
-timezone = "America/Chicago"
-
-[watering]
-inches_required = 1.5
-past_days = 3
-forecast_days = 2
-forecast_inches_max = 0.5
-event_inches = 0.25
-rain_delay_days = 2
-near_term_hours = 0
-near_term_inches_max = 0.25
-freeze_skip = true
-freeze_temp_f = 32
-check_hour = 4
-check_minute = 30
-updates_per_day = 2
-
-[season]
-start_month = 5
-start_day = 7
-end_month = 10
-end_day = 7
-
-[sewer]
-protect = true
-start_month = 1
-start_day = 16
-end_month = 3
-end_day = 15
-
-[weather]
-api_key = "test-key"
-
-[gpio]
-relay = 25
-watering_enabled_led = 4
-watering_disabled_led = 27
-mock = true
-
-[runtime]
-state_path = "state.json"
-fail_mode = "disable_watering"
-log_level = "INFO"
-weather_timeout_seconds = 15
-"""
+TEST_SETTINGS_OVERRIDES = {
+    "watering": {"near_term_hours": 0, "updates_per_day": 2},
+    "weather": {"api_key": "test-key"},
+    "gpio": {"mock": True},
+    "runtime": {"weather_timeout_seconds": 15},
+}
 
 
 @pytest.fixture
 def settings_path(tmp_path: Path) -> Path:
     path = tmp_path / "settings.toml"
-    path.write_text(SETTINGS.strip(), encoding="utf-8")
+    write_settings(path, load_example_settings(**TEST_SETTINGS_OVERRIDES))
     return path
 
 

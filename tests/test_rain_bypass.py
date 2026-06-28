@@ -9,7 +9,6 @@ import requests
 import responses
 
 from rain_bypass.app import (
-    VISUAL_CROSSING,
     WeatherSnapshot,
     _freeze_block,
     _max_daily_precip,
@@ -17,29 +16,27 @@ from rain_bypass.app import (
     _sum_precip_hours,
     allow_watering,
     decide,
-    fetch_precip,
     fetch_weather,
     forecast_window,
     main,
     past_ok,
     past_window,
-    precip_window,
     run,
     seconds_until_next_check,
     timeline_params,
+    timeline_request_params,
+    timeline_url_for,
     timeline_window,
     update_blocked_until,
     watering_required,
+    weather_api_smoke,
 )
 from rain_bypass.config import (
     ConfigError,
     FailMode,
     Gpio,
-    Season,
     State,
-    in_date_window,
-    in_season,
-    in_sewer_baseline_window,
+    in_sewer_lockout,
     load_settings,
 )
 from rain_bypass.gpio import MockPins, PiPins, watering_pins
@@ -62,11 +59,6 @@ def _snapshot(
     freeze_block: bool = False,
 ) -> WeatherSnapshot:
     return WeatherSnapshot(past, forecast, max_daily, near_term, freeze_block)
-
-
-def _timeline_url(settings, start: date, end: date) -> str:
-    loc = settings.location
-    return f"{VISUAL_CROSSING}/{loc.latitude},{loc.longitude}/{start}/{end}"
 
 
 def test_load_settings(settings):
@@ -113,20 +105,10 @@ def test_invalid_toml(settings_path):
         load_settings(settings_path)
 
 
-def test_season_overlap_sewer_rejected(settings_path):
-    text = settings_path.read_text(encoding="utf-8")
-    text = text.replace("start_month = 5", "start_month = 2").replace(
-        "start_day = 7", "start_day = 1"
-    )
-    settings_path.write_text(text, encoding="utf-8")
-    with pytest.raises(ConfigError, match="sewer baseline"):
-        load_settings(settings_path)
-
-
-def test_precip_window(settings, monkeypatch):
+def test_past_window(settings, monkeypatch):
     fixed = date(2024, 6, 10)
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: fixed)
-    start, end = precip_window(settings)
+    start, end = past_window(settings)
     assert end == fixed
     assert start == fixed - timedelta(days=settings.watering.past_days - 1)
     assert past_window(settings) == (start, end)
@@ -325,28 +307,28 @@ def test_sum_precip_day_count_mismatch_logs_warning(settings, caplog):
 
 def test_decide_at_threshold(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.app.fetch_weather", lambda _s: _snapshot(1.5, 0.5, 0.0))
-    required, rainfall, forecast, blocked_until, _, _ = decide(settings, State())
-    assert rainfall == pytest.approx(1.5)
-    assert forecast == pytest.approx(0.5)
-    assert blocked_until is None
-    assert required is True
+    decision = decide(settings, State())
+    assert decision.past_inches == pytest.approx(1.5)
+    assert decision.forecast_inches == pytest.approx(0.5)
+    assert decision.blocked_until is None
+    assert decision.watering_required is True
 
 
 def test_decide_just_over_threshold(settings, monkeypatch):
     fixed = date(2024, 6, 10)
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: fixed)
     monkeypatch.setattr("rain_bypass.app.fetch_weather", lambda _s: _snapshot(1.5001, 0.0, 0.0))
-    required, _, _, blocked_until, _, _ = decide(settings, State())
-    assert required is False
-    assert blocked_until == date(2024, 6, 12)
+    decision = decide(settings, State())
+    assert decision.watering_required is False
+    assert decision.blocked_until == date(2024, 6, 12)
 
 
 def test_decide_blocked_by_event_only(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.app.fetch_weather", lambda _s: _snapshot(0.5, 0.0, 0.25))
-    required, rainfall, _, blocked_until, _, _ = decide(settings, State())
-    assert rainfall == pytest.approx(0.5)
-    assert required is False
-    assert blocked_until is not None
+    decision = decide(settings, State())
+    assert decision.past_inches == pytest.approx(0.5)
+    assert decision.watering_required is False
+    assert decision.blocked_until is not None
 
 
 def test_decide_rain_delay_overrides_dry_weather(settings, monkeypatch, caplog):
@@ -355,19 +337,19 @@ def test_decide_rain_delay_overrides_dry_weather(settings, monkeypatch, caplog):
     monkeypatch.setattr("rain_bypass.app.fetch_weather", lambda _s: _snapshot(0.0, 0.0, 0.0))
     state = State(blocked_until=date(2024, 6, 12))
     with caplog.at_level("INFO"):
-        required, _, _, blocked_until, _, _ = decide(settings, state)
-    assert required is False
-    assert blocked_until == date(2024, 6, 12)
+        decision = decide(settings, state)
+    assert decision.watering_required is False
+    assert decision.blocked_until == date(2024, 6, 12)
     assert "rain delay active" in caplog.text
 
 
 def test_decide_blocked_by_forecast_only(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.app.fetch_weather", lambda _s: _snapshot(0.0, 0.51, 0.0))
-    required, rainfall, forecast, blocked_until, _, _ = decide(settings, State())
-    assert rainfall == pytest.approx(0.0)
-    assert forecast == pytest.approx(0.51)
-    assert required is False
-    assert blocked_until is None
+    decision = decide(settings, State())
+    assert decision.past_inches == pytest.approx(0.0)
+    assert decision.forecast_inches == pytest.approx(0.51)
+    assert decision.watering_required is False
+    assert decision.blocked_until is None
 
 
 def test_state_load_missing(tmp_path):
@@ -390,61 +372,28 @@ def test_state_round_trip(tmp_path):
     assert loaded.blocked_until == date(2024, 6, 15)
 
 
-def test_in_season(settings):
-    season = settings.season
-    assert in_season(season, date(2024, 6, 1)) is True
-    assert in_season(season, date(2024, 2, 1)) is False
-    assert in_season(season, date(2024, 5, 15)) is True
-
-
-def test_in_sewer_baseline_window(settings):
+def test_in_sewer_lockout(settings):
     sewer = settings.sewer
-    assert in_sewer_baseline_window(sewer, date(2024, 2, 1)) is True
-    assert in_sewer_baseline_window(sewer, date(2024, 1, 15)) is False
-    assert in_sewer_baseline_window(sewer, date(2024, 3, 15)) is True
-    assert in_sewer_baseline_window(sewer, date(2024, 3, 16)) is False
-    assert in_date_window(12, 1, 12, 31, date(2024, 6, 1)) is False
-
-    disabled = settings.model_copy(
-        update={"sewer": settings.sewer.model_copy(update={"protect": False})}
-    )
-    assert in_sewer_baseline_window(disabled.sewer, date(2024, 2, 1)) is False
+    assert in_sewer_lockout(sewer, date(2024, 2, 1)) is True
+    assert in_sewer_lockout(sewer, date(2024, 1, 15)) is False
+    assert in_sewer_lockout(sewer, date(2024, 3, 15)) is True
+    assert in_sewer_lockout(sewer, date(2024, 3, 16)) is False
 
 
-def test_sewer_protect_off_allows_overlapping_season(settings_path):
-    text = settings_path.read_text(encoding="utf-8")
-    text = text.replace("protect = true", "protect = false").replace(
-        "start_month = 5", "start_month = 2"
-    )
-    settings_path.write_text(text, encoding="utf-8")
-    settings = load_settings(settings_path)
-    assert settings.sewer.protect is False
-
-
-def test_decide_sewer_baseline_blocks(settings, monkeypatch, caplog):
+def test_decide_sewer_lockout_blocks(settings, monkeypatch, caplog):
     fixed = date(2024, 2, 10)
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: fixed)
 
     def _no_api(_settings):
-        raise AssertionError("weather API must not run during sewer baseline window")
+        raise AssertionError("weather API must not run during sewer lockout")
 
     monkeypatch.setattr("rain_bypass.app.fetch_weather", _no_api)
     with caplog.at_level("INFO"):
-        required, rainfall, _, _, in_season_flag, error = decide(settings, State())
-    assert required is False
-    assert rainfall is None
-    assert in_season_flag is False
-    assert error is None
-    assert "sewer baseline window" in caplog.text
-
-
-def test_out_of_season(settings):
-    winter = settings.model_copy(
-        update={"season": Season(start_month=12, start_day=1, end_month=12, end_day=31)}
-    )
-    required, rainfall, _, blocked_until, in_season_flag, error = decide(winter, State())
-    assert required is False and rainfall is None and blocked_until is None
-    assert in_season_flag is False and error is None
+        decision = decide(settings, State())
+    assert decision.watering_required is False
+    assert decision.past_inches is None
+    assert decision.error is None
+    assert "sewer lockout" in caplog.text
 
 
 def test_fail_mode_keep_last_state(settings, monkeypatch):
@@ -455,36 +404,34 @@ def test_fail_mode_keep_last_state(settings, monkeypatch):
     )
     state = State(watering_required=True, rainfall_inches=0.1, forecast_inches=0.05)
     monkeypatch.setattr("rain_bypass.app.fetch_weather", _weather_error)
-    required, _, forecast, blocked_until, _, _ = decide(settings, state)
-    assert required is True
-    assert forecast == pytest.approx(0.05)
-    assert blocked_until is None
+    decision = decide(settings, state)
+    assert decision.watering_required is True
+    assert decision.forecast_inches == pytest.approx(0.05)
+    assert decision.blocked_until is None
 
 
 def test_fail_safe(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.app.fetch_weather", _weather_error)
-    required, _, _, blocked_until, _, error = decide(
-        settings, State(watering_required=True, rainfall_inches=0.1)
-    )
-    assert required is False
-    assert blocked_until is None
-    assert error == "x"
+    decision = decide(settings, State(watering_required=True, rainfall_inches=0.1))
+    assert decision.watering_required is False
+    assert decision.blocked_until is None
+    assert decision.error == "x"
 
 
 def test_watering_required(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.app.fetch_weather", lambda _s: _snapshot(0.1))
-    required, rainfall, _, blocked_until, _, error = decide(settings, State())
-    assert required is True
-    assert rainfall == pytest.approx(0.1)
-    assert blocked_until is None
-    assert error is None
+    decision = decide(settings, State())
+    assert decision.watering_required is True
+    assert decision.past_inches == pytest.approx(0.1)
+    assert decision.blocked_until is None
+    assert decision.error is None
 
 
 def test_watering_blocked(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.app.fetch_weather", lambda _s: _snapshot(2.0, 0.0, 2.0))
-    required, _, _, blocked_until, _, _ = decide(settings, State())
-    assert required is False
-    assert blocked_until is not None
+    decision = decide(settings, State())
+    assert decision.watering_required is False
+    assert decision.blocked_until is not None
 
 
 def test_decide_blocked_by_freeze(settings, monkeypatch, caplog):
@@ -492,9 +439,9 @@ def test_decide_blocked_by_freeze(settings, monkeypatch, caplog):
         "rain_bypass.app.fetch_weather", lambda _s: _snapshot(0.0, 0.0, 0.0, freeze_block=True)
     )
     with caplog.at_level("INFO"):
-        required, _, _, blocked_until, _, _ = decide(settings, State())
-    assert required is False
-    assert blocked_until is None
+        decision = decide(settings, State())
+    assert decision.watering_required is False
+    assert decision.blocked_until is None
     assert "freeze skip active" in caplog.text
 
 
@@ -515,7 +462,7 @@ def _timeline_days(
 
 
 @responses.activate
-def test_fetch_precip(settings, monkeypatch):
+def test_fetch_weather(settings, monkeypatch):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
     api_start, api_end = timeline_window(settings)
@@ -527,9 +474,9 @@ def test_fetch_precip(settings, monkeypatch):
         "timezone": settings.location.timezone,
         "days": _timeline_days(settings, today, past=[0.25, 0.0, 0.35], forecast=[0.1, 0.05]),
     }
-    url = _timeline_url(settings, api_start, api_end)
+    url = timeline_url_for(settings, api_start, api_end)
     responses.add(responses.GET, url, json=payload, status=200)
-    totals = fetch_precip(settings)
+    totals = fetch_weather(settings)
     assert totals.past_inches == pytest.approx(
         _sum_precip(payload["days"], past_start, past_end)
     )
@@ -548,11 +495,11 @@ def test_fetch_precip(settings, monkeypatch):
 
 
 @responses.activate
-def test_fetch_precip_logs_query_cost_at_debug(settings, monkeypatch, caplog):
+def test_fetch_weather_logs_query_cost_at_debug(settings, monkeypatch, caplog):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
     api_start, api_end = timeline_window(settings)
-    url = _timeline_url(settings, api_start, api_end)
+    url = timeline_url_for(settings, api_start, api_end)
     responses.add(
         responses.GET,
         url,
@@ -564,16 +511,16 @@ def test_fetch_precip_logs_query_cost_at_debug(settings, monkeypatch, caplog):
         status=200,
     )
     with caplog.at_level("DEBUG"):
-        fetch_precip(settings)
+        fetch_weather(settings)
     assert "queryCost=7" in caplog.text
 
 
 @responses.activate
-def test_fetch_precip_timezone_mismatch_warns(settings, monkeypatch, caplog):
+def test_fetch_weather_timezone_mismatch_warns(settings, monkeypatch, caplog):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
     api_start, api_end = timeline_window(settings)
-    url = _timeline_url(settings, api_start, api_end)
+    url = timeline_url_for(settings, api_start, api_end)
     responses.add(
         responses.GET,
         url,
@@ -584,19 +531,19 @@ def test_fetch_precip_timezone_mismatch_warns(settings, monkeypatch, caplog):
         status=200,
     )
     with caplog.at_level("WARNING"):
-        fetch_precip(settings)
+        fetch_weather(settings)
     assert "differs from visual crossing" in caplog.text
 
 
 @responses.activate
-def test_fetch_precip_missing_days(settings, monkeypatch):
+def test_fetch_weather_missing_days(settings, monkeypatch):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
     api_start, api_end = timeline_window(settings)
-    url = _timeline_url(settings, api_start, api_end)
+    url = timeline_url_for(settings, api_start, api_end)
     responses.add(responses.GET, url, json={"days": "bad"}, status=200)
     with pytest.raises(requests.RequestException, match="missing daily data"):
-        fetch_precip(settings)
+        fetch_weather(settings)
 
 
 @responses.activate
@@ -608,30 +555,29 @@ def test_fetch_precip_missing_days(settings, monkeypatch):
         (500, "HTTP 500"),
     ],
 )
-def test_fetch_precip_http_errors(settings, monkeypatch, status, message):
+def test_fetch_weather_http_errors(settings, monkeypatch, status, message):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
     api_start, api_end = timeline_window(settings)
-    url = _timeline_url(settings, api_start, api_end)
+    url = timeline_url_for(settings, api_start, api_end)
     responses.add(responses.GET, url, status=status)
     with pytest.raises(requests.RequestException, match=message):
-        fetch_precip(settings)
+        fetch_weather(settings)
 
 
 @responses.activate
-def test_fetch_precip_invalid_json(settings, monkeypatch):
+def test_fetch_weather_invalid_json(settings, monkeypatch):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
     api_start, api_end = timeline_window(settings)
-    url = _timeline_url(settings, api_start, api_end)
+    url = timeline_url_for(settings, api_start, api_end)
     responses.add(responses.GET, url, body="not json", status=200)
     with pytest.raises(requests.RequestException, match="invalid JSON"):
-        fetch_precip(settings)
+        fetch_weather(settings)
 
 
 @responses.activate
-@responses.activate
-def test_fetch_precip_no_forecast_window(settings, monkeypatch):
+def test_fetch_weather_no_forecast_window(settings, monkeypatch):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
     no_forecast = settings.model_copy(
@@ -644,9 +590,9 @@ def test_fetch_precip_no_forecast_window(settings, monkeypatch):
         "timezone": settings.location.timezone,
         "days": _timeline_days(no_forecast, today, past=[0.2, 0.1, 0.3], forecast=[]),
     }
-    url = _timeline_url(no_forecast, api_start, api_end)
+    url = timeline_url_for(no_forecast, api_start, api_end)
     responses.add(responses.GET, url, json=payload, status=200)
-    totals = fetch_precip(no_forecast)
+    totals = fetch_weather(no_forecast)
     assert totals.past_inches == pytest.approx(0.6)
     assert totals.forecast_inches == pytest.approx(0.0)
 
@@ -673,7 +619,7 @@ def test_fetch_weather_near_term_hours(settings, monkeypatch):
             {"datetime": "2024-06-11T03:00:00", "precip": 0.2},
         ],
     }
-    url = _timeline_url(near, api_start, api_end)
+    url = timeline_url_for(near, api_start, api_end)
     responses.add(responses.GET, url, json=payload, status=200)
     snapshot = fetch_weather(near)
     assert snapshot.near_term_inches == pytest.approx(0.35)
@@ -691,7 +637,7 @@ def test_fetch_weather_missing_hours_when_near_term_enabled(settings, monkeypatc
         update={"watering": settings.watering.model_copy(update={"near_term_hours": 24})}
     )
     api_start, api_end = timeline_window(near)
-    url = _timeline_url(near, api_start, api_end)
+    url = timeline_url_for(near, api_start, api_end)
     responses.add(
         responses.GET,
         url,
@@ -705,13 +651,31 @@ def test_fetch_weather_missing_hours_when_near_term_enabled(settings, monkeypatc
         fetch_weather(near)
 
 
-def test_fetch_precip_connection_error(settings, monkeypatch):
+def test_fetch_weather_connection_error(settings, monkeypatch):
     def _down(*_args, **_kwargs):
         raise requests.ConnectionError("down")
 
     monkeypatch.setattr("rain_bypass.app.requests.get", _down)
     with pytest.raises(requests.ConnectionError, match="down"):
-        fetch_precip(settings)
+        fetch_weather(settings)
+
+
+def test_weather_api_smoke(settings, monkeypatch):
+    monkeypatch.setattr(
+        "rain_bypass.app.fetch_weather",
+        lambda _s: _snapshot(0.5, 0.1, 0.2),
+    )
+    message = weather_api_smoke(settings)
+    assert message.startswith("API OK:")
+    assert "0.50 in" in message
+    assert "forecast 0.10 in" in message
+
+
+def test_timeline_request_params(settings):
+    params = timeline_request_params(settings)
+    assert params["key"] == settings.weather.api_key
+    assert params["unitGroup"] == "us"
+    assert "elements" in params
 
 
 def test_run_once(tmp_path, settings_path, monkeypatch):

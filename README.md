@@ -22,6 +22,8 @@ pip install -e ".[dev]"    # use [gpio] on the Pi
 cp settings.example.toml settings.toml   # edit coordinates, pins, API key
 ```
 
+`settings.example.toml` is the canonical default config. Tests and `rain_bypass.settings_io` derive settings from it. Run `./install.sh` (or `rain-bypass-install`) for the interactive setup wizard.
+
 ## Run
 
 ```bash
@@ -38,8 +40,7 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 | ---------- | ----------------------------------------------------------------------- |
 | `location` | `latitude`, `longitude`, `timezone` (IANA name, e.g. `America/Chicago`) |
 | `watering` | `inches_required`, `past_days`, `forecast_days`, `forecast_inches_max`, `event_inches`, `rain_delay_days`, `near_term_hours`, `near_term_inches_max`, `freeze_skip`, `freeze_temp_f`, `check_hour`, `check_minute`, `updates_per_day` |
-| `season`   | `start_month/day`, `end_month/day` (must not overlap `[sewer]`)         |
-| `sewer`    | `protect`, `start_month/day`, `end_month/day` — hard block window       |
+| `sewer`    | `start_month/day`, `end_month/day` — hard block window (annual sewer cap) |
 | `weather`  | `api_key` (Visual Crossing Timeline API)                                |
 | `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`        |
 | `runtime`  | `state_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`       |
@@ -47,19 +48,16 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
 
-**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** — irrigation season **May 7–Oct 7** only; **sewer baseline lockout Jan 16–Mar 15** (city sets annual sewer cap from winter water use on the April bill).
+**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** — **sewer lockout Jan 16–Mar 15** (city sets annual sewer cap from winter water use on the April bill). Irrigation schedule timing is left to your controller; this app only enforces the sewer window plus rain-skip logic.
 
-### Sewer baseline protection
+### Sewer lockout
 
 Many municipalities (including Hartland/Waukesha) set **annual sewer charges from water used January 16 through March 15** (shown on April utility bills). Any irrigation on the same water meter during that window increases your sewer bill for the **entire year**.
 
-When `sewer.protect = true` (default, always on via `./install.sh`):
+During the sewer lockout window:
 
-- Watering is **hard blocked** during the sewer baseline window — before weather checks, season checks, or fail-mode logic.
+- Watering is **hard blocked** — before weather checks or fail-mode logic.
 - The relay stays in **block** mode; no API call is made.
-- Config validation **rejects** a `[season]` range that overlaps the sewer window.
-
-Keep `[season]` entirely outside Jan 16–Mar 15. Defaults (May 7–Oct 7) satisfy this.
 
 ### Weather behavior
 
@@ -82,7 +80,7 @@ Watering is allowed only when **all** gates pass and no active rain delay remain
 
 ## Code
 
-Three modules: `config` (settings), `app` (weather, logic, CLI), `gpio`. 100% test coverage enforced in CI.
+`config`, `settings_io`, `app`, `gpio`, and `install_cli`. `settings.example.toml` is the single source for defaults. CI runs Ruff, Pyright, ShellCheck, and pytest at 100% coverage.
 
 ## Hardware
 
@@ -105,12 +103,6 @@ Three modules: `config` (settings), `app` (weather, logic, CLI), `gpio`. 100% te
 
 
 Configure pins in `settings.toml` under `[gpio]`.
-
-### Photos
-
-Front view
-
-Side view
 
 ### Safety
 
