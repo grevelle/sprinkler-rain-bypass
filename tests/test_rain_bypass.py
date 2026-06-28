@@ -1,7 +1,8 @@
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pytest
 import requests
@@ -10,13 +11,23 @@ import responses
 from rain_bypass.app import (
     TIMELINE_QUERY,
     VISUAL_CROSSING,
+    PrecipTotals,
+    _max_daily_precip,
     _sum_precip,
+    allow_watering,
     decide,
     fetch_precip,
+    forecast_window,
     in_season,
     main,
+    past_ok,
+    past_window,
     precip_window,
     run,
+    seconds_until_next_check,
+    timeline_window,
+    update_blocked_until,
+    watering_required,
 )
 from rain_bypass.config import ConfigError, FailMode, Gpio, Season, State, load_settings
 from rain_bypass.gpio import MockPins, PiPins, watering_pins
@@ -31,6 +42,10 @@ def _weather_error(_settings):
     raise requests.RequestException("x")
 
 
+def _totals(past: float, forecast: float = 0.0, max_daily: float = 0.0) -> PrecipTotals:
+    return PrecipTotals(past, forecast, max_daily)
+
+
 def _timeline_url(settings, start: date, end: date) -> str:
     loc = settings.location
     return f"{VISUAL_CROSSING}/{loc.latitude},{loc.longitude}/{start}/{end}"
@@ -39,6 +54,12 @@ def _timeline_url(settings, start: date, end: date) -> str:
 def test_load_settings(settings):
     assert settings.location.latitude == pytest.approx(43.106)
     assert settings.watering.past_days == 3
+    assert settings.watering.forecast_days == 2
+    assert settings.watering.forecast_inches_max == pytest.approx(0.5)
+    assert settings.watering.event_inches == pytest.approx(0.25)
+    assert settings.watering.rain_delay_days == 1
+    assert settings.watering.check_hour == 4
+    assert settings.watering.check_minute == 30
     assert settings.watering.interval_seconds == pytest.approx(86400 / 2)
     assert settings.runtime.fail_mode is FailMode.DISABLE_WATERING
     assert settings.runtime.weather_timeout_seconds == 15
@@ -55,6 +76,8 @@ def test_missing_config(tmp_path):
     [
         (lambda text: text.replace("latitude = 43.106", "latitude = not_a_number"),),
         (lambda text: text.replace("past_days = 3", "past_days = 0"),),
+        (lambda text: text.replace("forecast_days = 2", "forecast_days = -1"),),
+        (lambda text: text.replace("rain_delay_days = 1", "rain_delay_days = -1"),),
         (lambda text: text.replace('api_key = "test-key"', 'api_key = ""'),),
     ],
 )
@@ -76,6 +99,84 @@ def test_precip_window(settings, monkeypatch):
     start, end = precip_window(settings)
     assert end == fixed
     assert start == fixed - timedelta(days=settings.watering.past_days - 1)
+    assert past_window(settings) == (start, end)
+
+
+def test_forecast_and_timeline_windows(settings, monkeypatch):
+    fixed = date(2024, 6, 10)
+    monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: fixed)
+    assert forecast_window(settings) == (date(2024, 6, 11), date(2024, 6, 12))
+    assert timeline_window(settings) == (date(2024, 6, 8), date(2024, 6, 12))
+
+    no_forecast = settings.model_copy(
+        update={"watering": settings.watering.model_copy(update={"forecast_days": 0})}
+    )
+    assert forecast_window(no_forecast) is None
+    assert timeline_window(no_forecast) == past_window(no_forecast)
+
+
+def test_allow_watering(settings):
+    assert allow_watering(_totals(1.5, 0.5, 0.0), settings) is True
+    assert allow_watering(_totals(1.5001, 0.0, 0.0), settings) is False
+    assert allow_watering(_totals(0.0, 0.5001, 0.0), settings) is False
+    assert allow_watering(_totals(1.5, 0.5001, 0.0), settings) is False
+    assert allow_watering(_totals(0.5, 0.0, 0.25), settings) is False
+
+
+def test_past_ok_event_and_cumulative(settings):
+    assert past_ok(_totals(1.5, 0, 0.24), settings) is True
+    assert past_ok(_totals(1.5001, 0, 0.0), settings) is False
+    assert past_ok(_totals(0.5, 0, 0.25), settings) is False
+
+    no_event = settings.model_copy(
+        update={"watering": settings.watering.model_copy(update={"event_inches": 0})}
+    )
+    assert past_ok(_totals(0.5, 0, 0.5), no_event) is True
+
+
+def test_rain_delay_helpers(settings):
+    today = date(2024, 6, 10)
+    assert update_blocked_until(
+        today, past_ok_flag=False, rain_delay_days=1, blocked_until=None
+    ) == date(2024, 6, 11)
+    assert update_blocked_until(
+        today, past_ok_flag=False, rain_delay_days=1, blocked_until=date(2024, 6, 12)
+    ) == date(2024, 6, 12)
+    assert update_blocked_until(
+        date(2024, 6, 13), past_ok_flag=True, rain_delay_days=1, blocked_until=date(2024, 6, 12)
+    ) is None
+    assert (
+        update_blocked_until(
+            today, past_ok_flag=True, rain_delay_days=0, blocked_until=date(2024, 6, 12)
+        )
+        is None
+    )
+    assert watering_required(today, True, date(2024, 6, 11)) is False
+    assert watering_required(date(2024, 6, 12), True, date(2024, 6, 11)) is True
+
+
+def test_seconds_until_next_check(settings):
+    scheduled = settings.model_copy(
+        update={"watering": settings.watering.model_copy(update={"updates_per_day": 1})}
+    )
+    tz = ZoneInfo("America/Chicago")
+    before = datetime(2024, 6, 10, 3, 0, tzinfo=tz)
+    assert seconds_until_next_check(scheduled, now=before) == pytest.approx(90 * 60)
+    after = datetime(2024, 6, 10, 5, 0, tzinfo=tz)
+    assert seconds_until_next_check(scheduled, now=after) == pytest.approx(23.5 * 3600)
+    interval = settings.watering.interval_seconds
+    assert seconds_until_next_check(settings, now=before) == pytest.approx(interval)
+    naive = datetime(2024, 6, 10, 3, 0)
+    assert seconds_until_next_check(scheduled, now=naive) == pytest.approx(90 * 60)
+
+
+def test_max_daily_precip():
+    days = [
+        {"datetime": "2024-06-01", "precip": 0.1},
+        {"datetime": "2024-06-02", "precip": 0.4},
+        {"precip": 9.0},
+    ]
+    assert _max_daily_precip(days, date(2024, 6, 1), date(2024, 6, 2)) == pytest.approx(0.4)
 
 
 def test_sum_precip_sums_inches():
@@ -117,16 +218,50 @@ def test_sum_precip_day_count_mismatch_logs_warning(settings, caplog):
 
 
 def test_decide_at_threshold(settings, monkeypatch):
-    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 1.5)
-    required, rainfall, _, _ = decide(settings, State())
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: _totals(1.5, 0.5, 0.0))
+    required, rainfall, forecast, blocked_until, _, _ = decide(settings, State())
     assert rainfall == pytest.approx(1.5)
+    assert forecast == pytest.approx(0.5)
+    assert blocked_until is None
     assert required is True
 
 
 def test_decide_just_over_threshold(settings, monkeypatch):
-    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 1.5001)
-    required, _, _, _ = decide(settings, State())
+    fixed = date(2024, 6, 10)
+    monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: fixed)
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: _totals(1.5001, 0.0, 0.0))
+    required, _, _, blocked_until, _, _ = decide(settings, State())
     assert required is False
+    assert blocked_until == date(2024, 6, 11)
+
+
+def test_decide_blocked_by_event_only(settings, monkeypatch):
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: _totals(0.5, 0.0, 0.25))
+    required, rainfall, _, blocked_until, _, _ = decide(settings, State())
+    assert rainfall == pytest.approx(0.5)
+    assert required is False
+    assert blocked_until is not None
+
+
+def test_decide_rain_delay_overrides_dry_weather(settings, monkeypatch, caplog):
+    fixed = date(2024, 6, 10)
+    monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: fixed)
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: _totals(0.0, 0.0, 0.0))
+    state = State(blocked_until=date(2024, 6, 11))
+    with caplog.at_level("INFO"):
+        required, _, _, blocked_until, _, _ = decide(settings, state)
+    assert required is False
+    assert blocked_until == date(2024, 6, 11)
+    assert "rain delay active" in caplog.text
+
+
+def test_decide_blocked_by_forecast_only(settings, monkeypatch):
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: _totals(0.0, 0.51, 0.0))
+    required, rainfall, forecast, blocked_until, _, _ = decide(settings, State())
+    assert rainfall == pytest.approx(0.0)
+    assert forecast == pytest.approx(0.51)
+    assert required is False
+    assert blocked_until is None
 
 
 def test_state_load_missing(tmp_path):
@@ -135,9 +270,18 @@ def test_state_load_missing(tmp_path):
 
 def test_state_round_trip(tmp_path):
     path = tmp_path / "state.json"
-    state = State(last_weather_update=123.0, watering_required=True, rainfall_inches=0.25)
+    state = State(
+        last_weather_update=123.0,
+        watering_required=True,
+        rainfall_inches=0.25,
+        forecast_inches=0.1,
+        blocked_until=date(2024, 6, 15),
+    )
     state.save(path)
-    assert State.load(path).rainfall_inches == pytest.approx(0.25)
+    loaded = State.load(path)
+    assert loaded.rainfall_inches == pytest.approx(0.25)
+    assert loaded.forecast_inches == pytest.approx(0.1)
+    assert loaded.blocked_until == date(2024, 6, 15)
 
 
 def test_in_season(settings):
@@ -151,8 +295,9 @@ def test_out_of_season(settings):
     winter = settings.model_copy(
         update={"season": Season(start_month=12, start_day=1, end_month=12, end_day=31)}
     )
-    required, rainfall, in_season_flag, error = decide(winter, State())
-    assert required is False and rainfall is None and in_season_flag is False and error is None
+    required, rainfall, _, blocked_until, in_season_flag, error = decide(winter, State())
+    assert required is False and rainfall is None and blocked_until is None
+    assert in_season_flag is False and error is None
 
 
 def test_fail_mode_keep_last_state(settings, monkeypatch):
@@ -161,49 +306,81 @@ def test_fail_mode_keep_last_state(settings, monkeypatch):
             "runtime": settings.runtime.model_copy(update={"fail_mode": FailMode.KEEP_LAST_STATE})
         }
     )
-    state = State(watering_required=True, rainfall_inches=0.1)
+    state = State(watering_required=True, rainfall_inches=0.1, forecast_inches=0.05)
     monkeypatch.setattr("rain_bypass.app.fetch_precip", _weather_error)
-    required, _, _, _ = decide(settings, state)
+    required, _, forecast, blocked_until, _, _ = decide(settings, state)
     assert required is True
+    assert forecast == pytest.approx(0.05)
+    assert blocked_until is None
 
 
 def test_fail_safe(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.app.fetch_precip", _weather_error)
-    required, _, _, error = decide(settings, State(watering_required=True, rainfall_inches=0.1))
+    required, _, _, blocked_until, _, error = decide(
+        settings, State(watering_required=True, rainfall_inches=0.1)
+    )
     assert required is False
+    assert blocked_until is None
     assert error == "x"
 
 
 def test_watering_required(settings, monkeypatch):
-    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 0.1)
-    required, rainfall, _, error = decide(settings, State())
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: _totals(0.1))
+    required, rainfall, _, blocked_until, _, error = decide(settings, State())
     assert required is True
     assert rainfall == pytest.approx(0.1)
+    assert blocked_until is None
     assert error is None
 
 
 def test_watering_blocked(settings, monkeypatch):
-    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 2.0)
-    required, _, _, _ = decide(settings, State())
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: _totals(2.0, 0.0, 2.0))
+    required, _, _, blocked_until, _, _ = decide(settings, State())
     assert required is False
+    assert blocked_until is not None
+
+
+def _timeline_days(
+    settings, today: date, *, past: list[float], forecast: list[float]
+) -> list[dict]:
+    past_start = today - timedelta(days=settings.watering.past_days - 1)
+    days: list[dict] = []
+    cursor = past_start
+    for amount in past:
+        days.append({"datetime": cursor.isoformat(), "precip": amount})
+        cursor += timedelta(days=1)
+    cursor = today + timedelta(days=1)
+    for amount in forecast:
+        days.append({"datetime": cursor.isoformat(), "precip": amount})
+        cursor += timedelta(days=1)
+    return days
 
 
 @responses.activate
 def test_fetch_precip(settings, monkeypatch):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
-    start = today - timedelta(days=settings.watering.past_days - 1)
+    api_start, api_end = timeline_window(settings)
+    past_start, past_end = past_window(settings)
+    forecast_start, forecast_end = forecast_window(settings)
+    assert forecast_start is not None and forecast_end is not None
     payload = {
         "queryCost": 7,
         "timezone": settings.location.timezone,
-        "days": [
-            {"datetime": start.isoformat(), "precip": 0.25},
-            {"datetime": today.isoformat(), "precip": 0.35},
-        ],
+        "days": _timeline_days(settings, today, past=[0.25, 0.0, 0.35], forecast=[0.1, 0.05]),
     }
-    url = _timeline_url(settings, start, today)
+    url = _timeline_url(settings, api_start, api_end)
     responses.add(responses.GET, url, json=payload, status=200)
-    assert fetch_precip(settings) == pytest.approx(0.6)
+    totals = fetch_precip(settings)
+    assert totals.past_inches == pytest.approx(
+        _sum_precip(payload["days"], past_start, past_end)
+    )
+    assert totals.forecast_inches == pytest.approx(
+        _sum_precip(payload["days"], forecast_start, forecast_end)
+    )
+    assert totals.past_inches == pytest.approx(0.6)
+    assert totals.forecast_inches == pytest.approx(0.15)
+    assert totals.max_daily_inches == pytest.approx(0.35)
     params = responses.calls[0].request.params
     assert params["key"] == settings.weather.api_key
     assert params["unitGroup"] == TIMELINE_QUERY["unitGroup"]
@@ -215,8 +392,8 @@ def test_fetch_precip(settings, monkeypatch):
 def test_fetch_precip_logs_query_cost_at_debug(settings, monkeypatch, caplog):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
-    start = today - timedelta(days=settings.watering.past_days - 1)
-    url = _timeline_url(settings, start, today)
+    api_start, api_end = timeline_window(settings)
+    url = _timeline_url(settings, api_start, api_end)
     responses.add(
         responses.GET,
         url,
@@ -236,8 +413,8 @@ def test_fetch_precip_logs_query_cost_at_debug(settings, monkeypatch, caplog):
 def test_fetch_precip_timezone_mismatch_warns(settings, monkeypatch, caplog):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
-    start = today - timedelta(days=settings.watering.past_days - 1)
-    url = _timeline_url(settings, start, today)
+    api_start, api_end = timeline_window(settings)
+    url = _timeline_url(settings, api_start, api_end)
     responses.add(
         responses.GET,
         url,
@@ -256,8 +433,8 @@ def test_fetch_precip_timezone_mismatch_warns(settings, monkeypatch, caplog):
 def test_fetch_precip_missing_days(settings, monkeypatch):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
-    start = today - timedelta(days=settings.watering.past_days - 1)
-    url = _timeline_url(settings, start, today)
+    api_start, api_end = timeline_window(settings)
+    url = _timeline_url(settings, api_start, api_end)
     responses.add(responses.GET, url, json={"days": "bad"}, status=200)
     with pytest.raises(requests.RequestException, match="missing daily data"):
         fetch_precip(settings)
@@ -275,8 +452,8 @@ def test_fetch_precip_missing_days(settings, monkeypatch):
 def test_fetch_precip_http_errors(settings, monkeypatch, status, message):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
-    start = today - timedelta(days=settings.watering.past_days - 1)
-    url = _timeline_url(settings, start, today)
+    api_start, api_end = timeline_window(settings)
+    url = _timeline_url(settings, api_start, api_end)
     responses.add(responses.GET, url, status=status)
     with pytest.raises(requests.RequestException, match=message):
         fetch_precip(settings)
@@ -286,11 +463,32 @@ def test_fetch_precip_http_errors(settings, monkeypatch, status, message):
 def test_fetch_precip_invalid_json(settings, monkeypatch):
     today = date.today()
     monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
-    start = today - timedelta(days=settings.watering.past_days - 1)
-    url = _timeline_url(settings, start, today)
+    api_start, api_end = timeline_window(settings)
+    url = _timeline_url(settings, api_start, api_end)
     responses.add(responses.GET, url, body="not json", status=200)
     with pytest.raises(requests.RequestException, match="invalid JSON"):
         fetch_precip(settings)
+
+
+@responses.activate
+def test_fetch_precip_no_forecast_window(settings, monkeypatch):
+    today = date.today()
+    monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: today)
+    no_forecast = settings.model_copy(
+        update={"watering": settings.watering.model_copy(update={"forecast_days": 0})}
+    )
+    past_start, past_end = past_window(no_forecast)
+    api_start, api_end = timeline_window(no_forecast)
+    assert api_start == past_start and api_end == past_end
+    payload = {
+        "timezone": settings.location.timezone,
+        "days": _timeline_days(no_forecast, today, past=[0.2, 0.1, 0.3], forecast=[]),
+    }
+    url = _timeline_url(no_forecast, api_start, api_end)
+    responses.add(responses.GET, url, json=payload, status=200)
+    totals = fetch_precip(no_forecast)
+    assert totals.past_inches == pytest.approx(0.6)
+    assert totals.forecast_inches == pytest.approx(0.0)
 
 
 def test_fetch_precip_connection_error(settings, monkeypatch):
@@ -318,7 +516,7 @@ def test_run_once(tmp_path, settings_path):
 
 
 def test_run_loop(settings, monkeypatch):
-    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 0.0)
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: _totals(0.0))
 
     def _stop(_seconds):
         raise KeyboardInterrupt
@@ -326,6 +524,22 @@ def test_run_loop(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.app.time.sleep", _stop)
     with pytest.raises(KeyboardInterrupt):
         run(settings, pin_factory=_noop_pins)
+
+
+def test_run_loop_uses_scheduled_check(settings, monkeypatch):
+    scheduled = settings.model_copy(
+        update={"watering": settings.watering.model_copy(update={"updates_per_day": 1})}
+    )
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: _totals(0.0))
+    monkeypatch.setattr("rain_bypass.app.seconds_until_next_check", lambda _s: 42.0)
+
+    def _stop(seconds):
+        assert seconds == pytest.approx(42.0)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("rain_bypass.app.time.sleep", _stop)
+    with pytest.raises(KeyboardInterrupt):
+        run(scheduled, pin_factory=_noop_pins)
 
 
 def test_mock_pins():
@@ -365,7 +579,7 @@ def test_watering_pins_pi_cleanup(fake_rpi, pi_gpio):
 
 
 def test_main_once(settings_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 0.0)
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: _totals(0.0))
     assert main(["--config", str(settings_path), "--once"]) == 0
 
 

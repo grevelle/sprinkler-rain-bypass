@@ -10,7 +10,19 @@ from typing import NamedTuple
 import pytest
 import requests
 
-from rain_bypass.app import TIMELINE_QUERY, VISUAL_CROSSING, _sum_precip, decide, fetch_precip, main
+from rain_bypass.app import (
+    TIMELINE_QUERY,
+    VISUAL_CROSSING,
+    _sum_precip,
+    allow_watering,
+    decide,
+    fetch_precip,
+    forecast_window,
+    main,
+    past_window,
+    timeline_window,
+    watering_required,
+)
 from rain_bypass.config import Settings, State, load_settings, local_today
 
 pytestmark = [
@@ -36,6 +48,10 @@ timezone = "{tz}"
 [watering]
 inches_required = 0.6
 past_days = 7
+forecast_days = 2
+forecast_inches_max = 0.5
+event_inches = 0.25
+rain_delay_days = 1
 updates_per_day = 1
 
 [season]
@@ -84,12 +100,6 @@ def live_case(tmp_path: Path, request) -> LiveCase:
     return LiveCase(config_path=config_path, settings=load_settings(config_path))
 
 
-def _window(settings: Settings) -> tuple[date, date]:
-    today = local_today(settings.location)
-    start = today - timedelta(days=settings.watering.past_days - 1)
-    return start, today
-
-
 def _timeline_url(settings: Settings, start: date, end: date) -> str:
     loc = settings.location
     return f"{VISUAL_CROSSING}/{loc.latitude},{loc.longitude}/{start}/{end}"
@@ -117,9 +127,9 @@ def _assert_days_contract(days: list) -> None:
 
 def test_live_timeline_api_contract(live_case: LiveCase):
     settings = live_case.settings
-    start, end = _window(settings)
+    api_start, api_end = timeline_window(settings)
     response = requests.get(
-        _timeline_url(settings, start, end),
+        _timeline_url(settings, api_start, api_end),
         params=_timeline_params(settings),
         timeout=30,
     )
@@ -129,35 +139,48 @@ def test_live_timeline_api_contract(live_case: LiveCase):
     _assert_days_contract(days)
     day_dates = {str(day["datetime"])[:10] for day in days}
     expected = {
-        (start + timedelta(days=offset)).isoformat()
-        for offset in range(settings.watering.past_days)
+        (api_start + timedelta(days=offset)).isoformat()
+        for offset in range((api_end - api_start).days + 1)
     }
     assert day_dates == expected
 
 
 def test_live_fetch_precip_returns_inches(live_case: LiveCase):
     settings = live_case.settings
-    start, end = _window(settings)
+    api_start, api_end = timeline_window(settings)
+    past_start, past_end = past_window(settings)
+    forecast = forecast_window(settings)
+    assert forecast is not None
+    forecast_start, forecast_end = forecast
     response = requests.get(
-        _timeline_url(settings, start, end),
+        _timeline_url(settings, api_start, api_end),
         params=_timeline_params(settings),
         timeout=30,
     ).json()
-    expected = _sum_precip(response["days"], start, end)
-    inches = fetch_precip(settings)
-    assert inches == pytest.approx(expected)
-    assert inches >= 0.0
-    assert inches <= 20.0
+    expected_past = _sum_precip(response["days"], past_start, past_end)
+    expected_forecast = _sum_precip(response["days"], forecast_start, forecast_end)
+    totals = fetch_precip(settings)
+    assert totals.past_inches == pytest.approx(expected_past)
+    assert totals.forecast_inches == pytest.approx(expected_forecast)
+    assert totals.past_inches >= 0.0
+    assert totals.forecast_inches >= 0.0
+    assert totals.past_inches <= 20.0
+    assert totals.forecast_inches <= 20.0
 
 
 def test_live_decide_matches_threshold(live_case: LiveCase):
     settings = live_case.settings
-    rainfall_inches = fetch_precip(settings)
-    required, rainfall, in_season_flag, error = decide(settings, State())
+    totals = fetch_precip(settings)
+    required, rainfall, forecast, blocked_until, in_season_flag, error = decide(settings, State())
     assert error is None
     assert in_season_flag is True
-    assert rainfall == pytest.approx(rainfall_inches)
-    assert required is (rainfall <= settings.watering.inches_required)
+    assert rainfall == pytest.approx(totals.past_inches)
+    assert forecast == pytest.approx(totals.forecast_inches)
+    assert required is watering_required(
+        local_today(settings.location),
+        allow_watering(totals, settings),
+        blocked_until,
+    )
 
 
 def test_live_main_once_persists_state(live_case: LiveCase):
@@ -166,7 +189,11 @@ def test_live_main_once_persists_state(live_case: LiveCase):
     saved = State.load(settings.runtime.state_path)
     assert saved.last_weather_update is not None
     assert saved.rainfall_inches is not None
+    assert saved.forecast_inches is not None
     assert saved.last_error is None
-    assert saved.watering_required is (
-        saved.rainfall_inches <= settings.watering.inches_required
+    totals = fetch_precip(settings)
+    assert saved.watering_required is watering_required(
+        local_today(settings.location),
+        allow_watering(totals, settings),
+        saved.blocked_until,
     )

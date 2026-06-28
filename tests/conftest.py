@@ -15,6 +15,12 @@ timezone = "America/Chicago"
 [watering]
 inches_required = 1.5
 past_days = 3
+forecast_days = 2
+forecast_inches_max = 0.5
+event_inches = 0.25
+rain_delay_days = 1
+check_hour = 4
+check_minute = 30
 updates_per_day = 2
 
 [season]

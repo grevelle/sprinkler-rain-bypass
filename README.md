@@ -37,7 +37,7 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 | Section    | Keys                                                                    |
 | ---------- | ----------------------------------------------------------------------- |
 | `location` | `latitude`, `longitude`, `timezone` (IANA name, e.g. `America/Chicago`) |
-| `watering` | `inches_required`, `past_days`, `updates_per_day`                       |
+| `watering` | `inches_required`, `past_days`, `forecast_days`, `forecast_inches_max`, `event_inches`, `rain_delay_days`, `check_hour`, `check_minute`, `updates_per_day` |
 | `season`   | `start_month/day`, `end_month/day`                                      |
 | `weather`  | `api_key` (Visual Crossing Timeline API)                                |
 | `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`        |
@@ -46,14 +46,23 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
 
-**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** (43.106, -88.351), `America/Chicago`, `past_days = 3`, `inches_required = 1.5`, season **May 7–Oct 7** (local average frost window). UF/IFAS recommends ~¼″ per rain event on physical sensors; lower `inches_required` saves more water.
+**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** (43.106, -88.351), `America/Chicago`, `past_days = 3`, `inches_required = 1.5`, `forecast_days = 2`, `forecast_inches_max = 0.5`, `event_inches = 0.25`, `rain_delay_days = 1`, check at **4:30 AM** local, season **May 7–Oct 7**.
 
 ### Weather behavior
 
-The app calls the [Visual Crossing Timeline API](https://www.visualcrossing.com/resources/documentation/weather-api/timeline-weather-api/) with an inclusive local-date range from `past_days` ago through today (computed from `location.timezone`). Daily `precip` is summed in **inches** (`unitGroup=us`).
+The app uses **past rain, forecast rain, rain events, and rain delay** to decide whether watering is allowed:
 
-- **Today** may blend observed rain with forecast rain for the rest of the day (`source: comb` in the API). That can block watering before a storm arrives — usually what you want for a rain bypass.
-- **API cost** is about one record per day returned (~`past_days` per check). Set `log_level = "DEBUG"` to log `queryCost` each request.
+1. **Past window** — sum daily `precip` from `past_days` ago through **today**. Block if total **exceeds** `inches_required`.
+2. **Rain event** — also block if **any single day** in that past window reaches `event_inches` (default ¼″; set `0` for cumulative-only).
+3. **Forecast window** — sum from **tomorrow** through `forecast_days` ahead. Block if total **exceeds** `forecast_inches_max`. Set `forecast_days = 0` to disable.
+4. **Rain delay** — when the past window blocks (cumulative or event), stay off for `rain_delay_days` even if totals drop the next day (Rain Bird-style). Stored in `state.json` as `blocked_until`.
+
+Watering is allowed only when **none** of the above block and no active delay remains. One [Visual Crossing Timeline API](https://www.visualcrossing.com/resources/documentation/weather-api/timeline-weather-api/) request covers the full range. Daily `precip` is summed in **inches** (`unitGroup=us`).
+
+**Check timing:** When `updates_per_day = 1`, the loop sleeps until the next `check_hour`:`check_minute` in `location.timezone` (default 4:30 AM — before most morning irrigation). With more than one check per day, checks are evenly spaced over 24 hours instead.
+
+- **Today** in the past window may blend observed rain with forecast rain for the rest of the day (`source: comb` in the API). That can block watering before a storm arrives — usually what you want for a rain bypass.
+- **API cost** is about one record per day returned (~`past_days + forecast_days` per check). Set `log_level = "DEBUG"` to log `queryCost` each request.
 - Match `location.timezone` to your coordinates; a mismatch with the API’s resolved timezone is logged as a warning.
 
 ## Code

@@ -5,10 +5,20 @@ longitude = -88.351
 timezone = "America/Chicago"
 
 [watering]
-# Block watering when cumulative rain over past_days exceeds this (inches).
+# Block when recent cumulative rain (through today) exceeds this (inches).
 # Defaults match Hunter Hydrawise (1.5 in / 3 days); UF/IFAS sensors often use ~1/4 in per event.
 inches_required = 1.5
 past_days = 3
+# Also block when forecast rain over the next forecast_days exceeds forecast_inches_max.
+forecast_days = 2
+forecast_inches_max = 0.5
+# Block if any single day in the past window reaches this (0 = cumulative only).
+event_inches = 0.25
+# After a past-window block, stay off for this many days (Rain Bird-style rain delay; 0 = off).
+rain_delay_days = 1
+# Daily check time when updates_per_day = 1 (before typical morning irrigation).
+check_hour = 4
+check_minute = 30
 updates_per_day = 1
 
 [season]

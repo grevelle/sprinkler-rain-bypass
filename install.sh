@@ -14,6 +14,11 @@ SERVICE_NAME="rain-bypass"
 # - past_days=3: Hunter Hydrawise uses a 3-day cumulative rainfall window.
 # - inches_required=1.5: Hydrawise default "skip if >1.5 in over 3 days" (cumulative).
 #   UF/IFAS physical rain sensors use ~1/4 in per event; this app sums recent days instead.
+# - forecast_days=2, forecast_inches_max=0.5: skip watering when ~1/2 in is forecast over the
+#   next two days (Rain Bird-style forecast delay; UF/IFAS ~1/4 in per event on physical sensors).
+# - event_inches=0.25: UF/IFAS-style single rain event (block if any past day >= this).
+# - rain_delay_days=1: Rain Bird-style hold after wet past window (stay off N days).
+# - check_hour=4, check_minute=30: daily check before typical morning irrigation (when updates_per_day=1).
 # - updates_per_day=1: once daily matches smart-controller weather checks and saves API quota.
 # Location defaults: Hartland, WI 53029 (Waukesha County zip centroid).
 # Frost dates (Almanac / nearest Waukesha station): last spring ~May 7, first fall ~Oct 7.
@@ -23,6 +28,12 @@ DEFAULT_LONGITUDE="-88.351"
 DEFAULT_TIMEZONE="America/Chicago"
 DEFAULT_INCHES_REQUIRED="1.5"
 DEFAULT_PAST_DAYS="3"
+DEFAULT_FORECAST_DAYS="2"
+DEFAULT_FORECAST_INCHES_MAX="0.5"
+DEFAULT_EVENT_INCHES="0.25"
+DEFAULT_RAIN_DELAY_DAYS="1"
+DEFAULT_CHECK_HOUR="4"
+DEFAULT_CHECK_MINUTE="30"
 DEFAULT_UPDATES_PER_DAY="1"
 DEFAULT_SEASON_START_MONTH="5"
 DEFAULT_SEASON_START_DAY="7"
@@ -95,13 +106,21 @@ collect_settings() {
   prompt TIMEZONE 'Timezone (IANA, e.g. America/Chicago)' "$DEFAULT_TIMEZONE"
 
   echo
-  info "Watering thresholds"
-  echo "  Defaults follow smart-controller practice: block when recent cumulative rain"
-  echo "  exceeds the threshold over the lookback window (Hunter Hydrawise: 1.5 in / 3 days)."
+  info "Watering thresholds (past + forecast)"
+  echo "  Past: block when cumulative rain through today exceeds the lookback threshold"
+  echo "  (Hunter Hydrawise: 1.5 in / 3 days). Today includes observed + rest-of-day forecast."
+  echo "  Forecast: also block when rain over the next N days exceeds the forecast cap"
+  echo "  (Rain Bird-style 1–2 day delay; default 0.5 in over 2 days)."
   echo "  UF/IFAS recommends ~1/4 in per rain event on physical sensors; lower values save more water."
-  prompt INCHES_REQUIRED "Block watering if total rain exceeds (inches)" "$DEFAULT_INCHES_REQUIRED"
-  prompt PAST_DAYS "Sum rain over this many days (lookback window)" "$DEFAULT_PAST_DAYS"
-  prompt UPDATES_PER_DAY "Weather checks per day (1 is usually enough)" "$DEFAULT_UPDATES_PER_DAY"
+  prompt INCHES_REQUIRED "Past window: block if total rain exceeds (inches)" "$DEFAULT_INCHES_REQUIRED"
+  prompt PAST_DAYS "Past window: sum rain over this many days (through today)" "$DEFAULT_PAST_DAYS"
+  prompt FORECAST_DAYS "Forecast window: look ahead this many days (0 to disable)" "$DEFAULT_FORECAST_DAYS"
+  prompt FORECAST_INCHES_MAX "Forecast window: block if total forecast rain exceeds (inches)" "$DEFAULT_FORECAST_INCHES_MAX"
+  prompt EVENT_INCHES "Past window: block if any single day reaches (inches; 0 = cumulative only)" "$DEFAULT_EVENT_INCHES"
+  prompt RAIN_DELAY_DAYS "After a past-window block, stay off this many days (0 = off)" "$DEFAULT_RAIN_DELAY_DAYS"
+  prompt CHECK_HOUR "Daily check hour, local time 0-23 (used when checks/day = 1)" "$DEFAULT_CHECK_HOUR"
+  prompt CHECK_MINUTE "Daily check minute 0-59" "$DEFAULT_CHECK_MINUTE"
+  prompt UPDATES_PER_DAY "Weather checks per day (1 aligns to check hour above)" "$DEFAULT_UPDATES_PER_DAY"
 
   echo
   info "Watering season (rain bypass active only between these dates)"
@@ -154,6 +173,12 @@ timezone = "${TIMEZONE}"
 [watering]
 inches_required = ${INCHES_REQUIRED}
 past_days = ${PAST_DAYS}
+forecast_days = ${FORECAST_DAYS}
+forecast_inches_max = ${FORECAST_INCHES_MAX}
+event_inches = ${EVENT_INCHES}
+rain_delay_days = ${RAIN_DELAY_DAYS}
+check_hour = ${CHECK_HOUR}
+check_minute = ${CHECK_MINUTE}
 updates_per_day = ${UPDATES_PER_DAY}
 
 [season]
@@ -190,17 +215,21 @@ test_api() {
   info "Testing Visual Crossing API (one fetch)"
   "$PYTHON" <<'PY'
 import sys
-from rain_bypass.app import fetch_precip, precip_window
+from rain_bypass.app import fetch_precip, past_window, timeline_window
 from rain_bypass.config import load_settings
 
 settings = load_settings("settings.toml")
 try:
-    start, end = precip_window(settings)
-    inches = fetch_precip(settings)
+    past_start, past_end = past_window(settings)
+    api_start, api_end = timeline_window(settings)
+    totals = fetch_precip(settings)
 except Exception as exc:
     print(f"API test failed: {exc}", file=sys.stderr)
     raise SystemExit(1) from exc
-print(f"API OK: {inches:.2f} in from {start} to {end}")
+print(
+    f"API OK: past {totals.past_inches:.2f} in ({past_start} to {past_end}), "
+    f"forecast {totals.forecast_inches:.2f} in (timeline {api_start} to {api_end})"
+)
 PY
 }
 

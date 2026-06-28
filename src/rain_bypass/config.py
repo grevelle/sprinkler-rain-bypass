@@ -31,6 +31,12 @@ class Location(FrozenModel):
 class Watering(FrozenModel):
     inches_required: float
     past_days: int = Field(ge=1)
+    forecast_days: int = Field(default=2, ge=0)
+    forecast_inches_max: float = Field(default=0.5, ge=0)
+    event_inches: float = Field(default=0.25, ge=0)
+    rain_delay_days: int = Field(default=1, ge=0)
+    check_hour: int = Field(default=4, ge=0, le=23)
+    check_minute: int = Field(default=30, ge=0, le=59)
     updates_per_day: int = Field(ge=1)
 
     @property
@@ -81,6 +87,8 @@ class State(FrozenModel):
     last_weather_update: float | None = None
     watering_required: bool | None = None
     rainfall_inches: float | None = None
+    forecast_inches: float | None = None
+    blocked_until: date | None = None
     last_error: str | None = None
 
     @classmethod

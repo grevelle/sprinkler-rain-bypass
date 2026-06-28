@@ -4,8 +4,10 @@ import argparse
 import logging
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -25,27 +27,121 @@ TIMELINE_QUERY = {
 }
 
 
+class PrecipTotals(NamedTuple):
+    past_inches: float
+    forecast_inches: float
+    max_daily_inches: float
+
+
 def in_season(season: Season, today: date) -> bool:
     start = date(today.year, season.start_month, season.start_day)
     end = date(today.year, season.end_month, season.end_day)
     return start <= today <= end if start <= end else today >= start or today <= end
 
 
-def precip_window(settings: Settings) -> tuple[date, date]:
+def past_window(settings: Settings) -> tuple[date, date]:
     today = local_today(settings.location)
     past_days = settings.watering.past_days
     return today - timedelta(days=past_days - 1), today
 
 
-def fetch_precip(settings: Settings) -> float:
-    start, end = precip_window(settings)
+def forecast_window(settings: Settings) -> tuple[date, date] | None:
+    forecast_days = settings.watering.forecast_days
+    if forecast_days <= 0:
+        return None
+    today = local_today(settings.location)
+    return today + timedelta(days=1), today + timedelta(days=forecast_days)
+
+
+def timeline_window(settings: Settings) -> tuple[date, date]:
+    past_start, past_end = past_window(settings)
+    forecast = forecast_window(settings)
+    if forecast is None:
+        return past_start, past_end
+    return past_start, forecast[1]
+
+
+def precip_window(settings: Settings) -> tuple[date, date]:
+    """Past lookback window (backward compatible alias)."""
+    return past_window(settings)
+
+
+def past_ok(totals: PrecipTotals, settings: Settings) -> bool:
+    w = settings.watering
+    if totals.past_inches > w.inches_required:
+        return False
+    if w.event_inches > 0 and totals.max_daily_inches >= w.event_inches:
+        return False
+    return True
+
+
+def allow_watering(totals: PrecipTotals, settings: Settings) -> bool:
+    w = settings.watering
+    forecast_ok = totals.forecast_inches <= w.forecast_inches_max
+    return past_ok(totals, settings) and forecast_ok
+
+
+def update_blocked_until(
+    today: date,
+    *,
+    past_ok_flag: bool,
+    rain_delay_days: int,
+    blocked_until: date | None,
+) -> date | None:
+    if rain_delay_days <= 0:
+        return None
+    if not past_ok_flag:
+        candidate = today + timedelta(days=rain_delay_days)
+        return candidate if blocked_until is None else max(blocked_until, candidate)
+    if blocked_until and today > blocked_until:
+        return None
+    return blocked_until
+
+
+def watering_required(
+    today: date,
+    weather_allow: bool,
+    blocked_until: date | None,
+) -> bool:
+    if blocked_until and today <= blocked_until:
+        return False
+    return weather_allow
+
+
+def seconds_until_next_check(settings: Settings, *, now: datetime | None = None) -> float:
+    if settings.watering.updates_per_day != 1:
+        return settings.watering.interval_seconds
+
+    tz = ZoneInfo(settings.location.timezone)
+    current = now or datetime.now(tz)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=tz)
+    else:
+        current = current.astimezone(tz)
+
+    w = settings.watering
+    target = current.replace(
+        hour=w.check_hour,
+        minute=w.check_minute,
+        second=0,
+        microsecond=0,
+    )
+    if current >= target:
+        target += timedelta(days=1)
+    return (target - current).total_seconds()
+
+
+def fetch_precip(settings: Settings) -> PrecipTotals:
+    api_start, api_end = timeline_window(settings)
+    past_start, past_end = past_window(settings)
+    forecast = forecast_window(settings)
     loc = settings.location
     timeout = settings.runtime.weather_timeout_seconds
     payload = _get_timeline(
         loc.latitude,
         loc.longitude,
-        start,
-        end,
+        api_start,
+        api_end,
         api_key=settings.weather.api_key,
         timeout=timeout,
     )
@@ -53,24 +149,59 @@ def fetch_precip(settings: Settings) -> float:
     daily = payload.get("days")
     if not isinstance(daily, list):
         raise requests.RequestException("visual crossing response missing daily data")
-    inches = _sum_precip(daily, start, end)
-    logger.info(
-        "visual_crossing precipitation %.2f in over %s days (%s to %s)",
-        inches,
-        settings.watering.past_days,
-        start,
-        end,
-    )
-    return inches
+
+    past_inches = _sum_precip(daily, past_start, past_end)
+    max_daily = _max_daily_precip(daily, past_start, past_end)
+    if forecast is None:
+        forecast_inches = 0.0
+        forecast_start = forecast_end = None
+    else:
+        forecast_start, forecast_end = forecast
+        forecast_inches = _sum_precip(daily, forecast_start, forecast_end)
+
+    w = settings.watering
+    if forecast is None:
+        logger.info(
+            "visual_crossing past %.2f in (max day %.2f, %s to %s); "
+            "allow if past <= %.2f in and no day >= %.2f in",
+            past_inches,
+            max_daily,
+            past_start,
+            past_end,
+            w.inches_required,
+            w.event_inches,
+        )
+    else:
+        logger.info(
+            "visual_crossing past %.2f in (max day %.2f, %s to %s), "
+            "forecast %.2f in (%s to %s); allow if past <= %.2f, no day >= %.2f, "
+            "forecast <= %.2f",
+            past_inches,
+            max_daily,
+            past_start,
+            past_end,
+            forecast_inches,
+            forecast_start,
+            forecast_end,
+            w.inches_required,
+            w.event_inches,
+            w.forecast_inches_max,
+        )
+    return PrecipTotals(past_inches, forecast_inches, max_daily)
 
 
-def decide(settings: Settings, state: State) -> tuple[bool, float | None, bool, str | None]:
-    """Return (watering_required, rainfall_inches, in_season, error)."""
+def decide(
+    settings: Settings, state: State
+) -> tuple[bool, float | None, float | None, date | None, bool, str | None]:
+    """Return (watering_required, past_inches, forecast_inches, blocked_until, in_season, error)."""
     if not in_season(settings.season, local_today(settings.location)):
-        return False, None, False, None
+        return False, None, None, state.blocked_until, False, None
+
+    today = local_today(settings.location)
+    blocked_until = state.blocked_until
 
     try:
-        rainfall = fetch_precip(settings)
+        totals = fetch_precip(settings)
     except requests.RequestException as exc:
         logger.warning("weather failed; fail_mode=%s", settings.runtime.fail_mode)
         keep = (
@@ -80,12 +211,23 @@ def decide(settings: Settings, state: State) -> tuple[bool, float | None, bool, 
         return (
             state.watering_required if keep else False,
             state.rainfall_inches,
+            state.forecast_inches,
+            blocked_until,
             True,
             str(exc),
         )
 
-    required = rainfall <= settings.watering.inches_required
-    return required, rainfall, True, None
+    weather_allow = allow_watering(totals, settings)
+    blocked_until = update_blocked_until(
+        today,
+        past_ok_flag=past_ok(totals, settings),
+        rain_delay_days=settings.watering.rain_delay_days,
+        blocked_until=blocked_until,
+    )
+    required = watering_required(today, weather_allow, blocked_until)
+    if blocked_until and today <= blocked_until and weather_allow:
+        logger.info("rain delay active through %s; watering blocked", blocked_until)
+    return required, totals.past_inches, totals.forecast_inches, blocked_until, True, None
 
 
 def _timeline_url(lat: float, lon: float, start: date, end: date) -> str:
@@ -147,6 +289,19 @@ def _log_timeline_meta(payload: dict, settings: Settings) -> None:
         )
 
 
+def _max_daily_precip(days: list, start: date, end: date) -> float:
+    start_s, end_s = start.isoformat(), end.isoformat()
+    peak = 0.0
+    for day in days:
+        raw = day.get("datetime")
+        if not raw:
+            continue
+        day_s = str(raw)[:10]
+        if start_s <= day_s <= end_s:
+            peak = max(peak, float(day.get("precip") or 0))
+    return peak
+
+
 def _sum_precip(days: list, start: date, end: date) -> float:
     if not days:
         raise requests.RequestException("visual crossing returned no daily rows")
@@ -174,12 +329,16 @@ def _sum_precip(days: list, start: date, end: date) -> float:
 
 
 def _tick(settings: Settings, state: State, apply) -> State:
-    watering_required, rainfall_inches, _, error = decide(settings, state)
-    apply(watering_required)
+    watering_required_flag, rainfall_inches, forecast_inches, blocked_until, _, error = decide(
+        settings, state
+    )
+    apply(watering_required_flag)
     state = State(
         last_weather_update=time.time(),
-        watering_required=watering_required,
+        watering_required=watering_required_flag,
         rainfall_inches=rainfall_inches,
+        forecast_inches=forecast_inches,
+        blocked_until=blocked_until,
         last_error=error,
     )
     state.save(settings.runtime.state_path)
@@ -195,7 +354,7 @@ def run(settings: Settings, *, once: bool = False, pin_factory: PinFactory = wat
 
         while True:
             state = _tick(settings, state, driver.apply)
-            time.sleep(settings.watering.interval_seconds)
+            time.sleep(seconds_until_next_check(settings))
 
 
 def main(argv: list[str] | None = None) -> int:
