@@ -1,3 +1,4 @@
+# Template — paths are filled by install.sh. Manual install: edit ExecStart and WorkingDirectory.
 [Unit]
 Description=Sprinkler rain bypass controller
 After=network-online.target
@@ -8,7 +9,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/sprinkler-rain-bypass
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/bin/python3 -m rain_bypass --config /opt/sprinkler-rain-bypass/settings.toml
+ExecStart=/opt/sprinkler-rain-bypass/.venv/bin/python -m rain_bypass --config /opt/sprinkler-rain-bypass/settings.toml
 Restart=on-failure
 RestartSec=300
 

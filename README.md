@@ -6,11 +6,20 @@ Get a free API key at [Visual Crossing](https://www.visualcrossing.com/weather-a
 
 ## Setup
 
+On a Raspberry Pi (or Linux), run the interactive installer — it creates a venv, prompts for all settings, validates your API key, and optionally installs systemd:
+
 ```bash
 git clone https://github.com/grevelle/sprinkler-rain-bypass.git
 cd sprinkler-rain-bypass
-pip install -e ".[gpio]"
-cp settings.example.toml settings.toml   # edit coordinates, pins, thresholds
+chmod +x install.sh
+./install.sh
+```
+
+Manual setup (or development off the Pi):
+
+```bash
+pip install -e ".[dev]"    # use [gpio] on the Pi
+cp settings.example.toml settings.toml   # edit coordinates, pins, API key
 ```
 
 ## Run
@@ -83,8 +92,11 @@ Verify relay behavior with your controller before unattended use. Match relay ra
 
 ## systemd
 
+`./install.sh` can install the service with correct paths for your install directory. To install manually, edit `deploy/rain-bypass.service` (paths and `.venv` python), then:
+
 ```bash
 sudo cp deploy/rain-bypass.service /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl enable --now rain-bypass
 ```
 
