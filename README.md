@@ -100,14 +100,26 @@ Layered modules: `config`, `settings_io`, `windows`, `weather` (httpx), `logic`,
 
 ## Development
 
-Install dev dependencies, then enable pre-commit hooks locally (Ruff, format, ShellCheck — same as CI). Pyright runs against the installed package:
+Install dev dependencies once, then enable Git hooks so CI failures are caught **before** you push:
 
 ```bash
 pip install -e ".[dev,gpio]"
-pre-commit install
-pre-commit run --all-files   # optional: run once without committing
-pyright                      # strict typing on src/
+pre-commit install   # commit: Ruff + ShellCheck; push: Pyright + pytest too
 ```
+
+Run the same checks as GitHub Actions manually (recommended on Windows before every commit):
+
+```powershell
+.\scripts\ci.ps1
+```
+
+```bash
+./scripts/ci.sh
+```
+
+If Ruff auto-fixes imports during a hook run, stage those edits and commit again. `.gitattributes` keeps `install.sh` LF so ShellCheck matches Linux CI.
+
+Pyright alone: `pyright`
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 

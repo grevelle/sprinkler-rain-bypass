@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Pi Zero W tuning: safe GPIO boot state, systemd memory cap, installer/SD-card pip flags, README platform notes.
 - `install.sh` prerequisite checks on apt-based systems (python3-venv, git, Pi build packages) with optional auto-install.
+- `scripts/ci.sh` and `scripts/ci.ps1` to mirror GitHub Actions locally; pre-push hooks for Pyright and pytest; `.gitattributes` for LF shell scripts.
 
 ### Changed
 

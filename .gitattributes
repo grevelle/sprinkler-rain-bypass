@@ -1,0 +1,5 @@
+# Keep shell scripts and workflow files LF so ShellCheck and GitHub Actions match Linux CI.
+*.sh text eol=lf
+*.bash text eol=lf
+.github/** text eol=lf
+.pre-commit-config.yaml text eol=lf
