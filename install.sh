@@ -16,8 +16,10 @@ SERVICE_NAME="rain-bypass"
 #   UF/IFAS physical rain sensors use ~1/4 in per event; this app sums recent days instead.
 # - forecast_days=2, forecast_inches_max=0.5: skip watering when ~1/2 in is forecast over the
 #   next two days (Rain Bird-style forecast delay; UF/IFAS ~1/4 in per event on physical sensors).
-# - event_inches=0.25: UF/IFAS-style single rain event (block if any past day >= this).
-# - rain_delay_days=1: Rain Bird-style hold after wet past window (stay off N days).
+# - event_inches=0.25: UF/IFAS / Rain Bird sensor trip (~1/4 in per event).
+# - rain_delay_days=2: Rain Bird default manual rain delay; hold after wet past window.
+# - near_term_hours=24, near_term_inches_max=0.25: skip if >=1/4 in in next 24h (Rachio-style).
+# - freeze_skip=true, freeze_temp_f=32: block when today/tomorrow forecast low below freezing.
 # - check_hour=4, check_minute=30: daily check before typical morning irrigation (when updates_per_day=1).
 # - updates_per_day=1: once daily matches smart-controller weather checks and saves API quota.
 # Location defaults: Hartland, WI 53029 (Waukesha County zip centroid).
@@ -31,7 +33,11 @@ DEFAULT_PAST_DAYS="3"
 DEFAULT_FORECAST_DAYS="2"
 DEFAULT_FORECAST_INCHES_MAX="0.5"
 DEFAULT_EVENT_INCHES="0.25"
-DEFAULT_RAIN_DELAY_DAYS="1"
+DEFAULT_RAIN_DELAY_DAYS="2"
+DEFAULT_NEAR_TERM_HOURS="24"
+DEFAULT_NEAR_TERM_INCHES_MAX="0.25"
+DEFAULT_FREEZE_SKIP="true"
+DEFAULT_FREEZE_TEMP_F="32"
 DEFAULT_CHECK_HOUR="4"
 DEFAULT_CHECK_MINUTE="30"
 DEFAULT_UPDATES_PER_DAY="1"
@@ -106,18 +112,26 @@ collect_settings() {
   prompt TIMEZONE 'Timezone (IANA, e.g. America/Chicago)' "$DEFAULT_TIMEZONE"
 
   echo
-  info "Watering thresholds (past + forecast)"
-  echo "  Past: block when cumulative rain through today exceeds the lookback threshold"
-  echo "  (Hunter Hydrawise: 1.5 in / 3 days). Today includes observed + rest-of-day forecast."
-  echo "  Forecast: also block when rain over the next N days exceeds the forecast cap"
-  echo "  (Rain Bird-style 1–2 day delay; default 0.5 in over 2 days)."
-  echo "  UF/IFAS recommends ~1/4 in per rain event on physical sensors; lower values save more water."
+  info "Watering thresholds (best-in-class rain bypass defaults)"
+  echo "  Matches smart-controller practice: Hydrawise cumulative + Rain Bird forecast"
+  echo "  delay + UF/IFAS event sensor + post-rain hold."
+  echo "  Past: block if total rain through today exceeds threshold (1.5 in / 3 days)."
+  echo "  Event: block if any single day in that window reaches 1/4 in (physical sensor)."
+  echo "  Forecast: block if total over next 2 days exceeds 1/2 in (~1/4 in/day)."
+  echo "  Rain delay: stay off 2 days after a past-window block (Rain Bird default)."
+  echo "  Near term: block if >= 1/4 in is expected in the next 24 hours (Rachio-style)."
+  echo "  Freeze skip: block when today or tomorrow forecast low is below 32 F."
+  echo "  Lower values save more water; these defaults favor proven industry norms."
   prompt INCHES_REQUIRED "Past window: block if total rain exceeds (inches)" "$DEFAULT_INCHES_REQUIRED"
   prompt PAST_DAYS "Past window: sum rain over this many days (through today)" "$DEFAULT_PAST_DAYS"
   prompt FORECAST_DAYS "Forecast window: look ahead this many days (0 to disable)" "$DEFAULT_FORECAST_DAYS"
   prompt FORECAST_INCHES_MAX "Forecast window: block if total forecast rain exceeds (inches)" "$DEFAULT_FORECAST_INCHES_MAX"
   prompt EVENT_INCHES "Past window: block if any single day reaches (inches; 0 = cumulative only)" "$DEFAULT_EVENT_INCHES"
-  prompt RAIN_DELAY_DAYS "After a past-window block, stay off this many days (0 = off)" "$DEFAULT_RAIN_DELAY_DAYS"
+  prompt RAIN_DELAY_DAYS "After a past-window block, stay off this many days (Rain Bird uses 2)" "$DEFAULT_RAIN_DELAY_DAYS"
+  prompt NEAR_TERM_HOURS "Block if rain exceeds threshold within this many hours (0 = off)" "$DEFAULT_NEAR_TERM_HOURS"
+  prompt NEAR_TERM_INCHES_MAX "Near-term window: block if total rain exceeds (inches)" "$DEFAULT_NEAR_TERM_INCHES_MAX"
+  prompt FREEZE_SKIP "Block when forecast low is below freeze temp (true/false)" "$DEFAULT_FREEZE_SKIP"
+  prompt FREEZE_TEMP_F "Freeze skip threshold (Fahrenheit)" "$DEFAULT_FREEZE_TEMP_F"
   prompt CHECK_HOUR "Daily check hour, local time 0-23 (used when checks/day = 1)" "$DEFAULT_CHECK_HOUR"
   prompt CHECK_MINUTE "Daily check minute 0-59" "$DEFAULT_CHECK_MINUTE"
   prompt UPDATES_PER_DAY "Weather checks per day (1 aligns to check hour above)" "$DEFAULT_UPDATES_PER_DAY"
@@ -177,6 +191,10 @@ forecast_days = ${FORECAST_DAYS}
 forecast_inches_max = ${FORECAST_INCHES_MAX}
 event_inches = ${EVENT_INCHES}
 rain_delay_days = ${RAIN_DELAY_DAYS}
+near_term_hours = ${NEAR_TERM_HOURS}
+near_term_inches_max = ${NEAR_TERM_INCHES_MAX}
+freeze_skip = ${FREEZE_SKIP}
+freeze_temp_f = ${FREEZE_TEMP_F}
 check_hour = ${CHECK_HOUR}
 check_minute = ${CHECK_MINUTE}
 updates_per_day = ${UPDATES_PER_DAY}
@@ -228,7 +246,8 @@ except Exception as exc:
     raise SystemExit(1) from exc
 print(
     f"API OK: past {totals.past_inches:.2f} in ({past_start} to {past_end}), "
-    f"forecast {totals.forecast_inches:.2f} in (timeline {api_start} to {api_end})"
+    f"forecast {totals.forecast_inches:.2f} in, near_term {totals.near_term_inches:.2f} in, "
+    f"freeze_block={totals.freeze_block} (timeline {api_start} to {api_end})"
 )
 PY
 }

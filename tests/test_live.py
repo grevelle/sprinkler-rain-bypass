@@ -11,7 +11,6 @@ import pytest
 import requests
 
 from rain_bypass.app import (
-    TIMELINE_QUERY,
     VISUAL_CROSSING,
     _sum_precip,
     allow_watering,
@@ -20,6 +19,7 @@ from rain_bypass.app import (
     forecast_window,
     main,
     past_window,
+    timeline_params,
     timeline_window,
     watering_required,
 )
@@ -51,7 +51,11 @@ past_days = 7
 forecast_days = 2
 forecast_inches_max = 0.5
 event_inches = 0.25
-rain_delay_days = 1
+rain_delay_days = 2
+near_term_hours = 24
+near_term_inches_max = 0.25
+freeze_skip = true
+freeze_temp_f = 32
 updates_per_day = 1
 
 [season]
@@ -108,7 +112,7 @@ def _timeline_url(settings: Settings, start: date, end: date) -> str:
 def _timeline_params(settings: Settings) -> dict:
     return {
         "key": settings.weather.api_key,
-        **TIMELINE_QUERY,
+        **timeline_params(settings),
     }
 
 
@@ -166,6 +170,8 @@ def test_live_fetch_precip_returns_inches(live_case: LiveCase):
     assert totals.forecast_inches >= 0.0
     assert totals.past_inches <= 20.0
     assert totals.forecast_inches <= 20.0
+    assert totals.near_term_inches >= 0.0
+    assert isinstance(totals.freeze_block, bool)
 
 
 def test_live_decide_matches_threshold(live_case: LiveCase):

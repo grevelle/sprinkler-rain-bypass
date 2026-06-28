@@ -19,18 +19,19 @@ logger = logging.getLogger(__name__)
 VISUAL_CROSSING = (
     "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
 )
-# Timeline docs: include=days + elements limits payload and queryCost (~1 record/day).
-TIMELINE_QUERY = {
-    "unitGroup": "us",
-    "elements": "datetime,precip",
-    "include": "days",
-}
+TIMELINE_BASE = {"unitGroup": "us"}
 
 
-class PrecipTotals(NamedTuple):
+class WeatherSnapshot(NamedTuple):
     past_inches: float
     forecast_inches: float
     max_daily_inches: float
+    near_term_inches: float
+    freeze_block: bool
+
+
+# Backward-compatible alias for tests and callers expecting precip totals only.
+PrecipTotals = WeatherSnapshot
 
 
 def in_season(season: Season, today: date) -> bool:
@@ -66,19 +67,53 @@ def precip_window(settings: Settings) -> tuple[date, date]:
     return past_window(settings)
 
 
-def past_ok(totals: PrecipTotals, settings: Settings) -> bool:
+def local_now(settings: Settings, now: datetime | None = None) -> datetime:
+    tz = ZoneInfo(settings.location.timezone)
+    current = now or datetime.now(tz)
+    if current.tzinfo is None:
+        return current.replace(tzinfo=tz)
+    return current.astimezone(tz)
+
+
+def near_term_window(
+    settings: Settings, now: datetime | None = None
+) -> tuple[datetime, datetime] | None:
+    hours = settings.watering.near_term_hours
+    if hours <= 0:
+        return None
+    start = local_now(settings, now)
+    return start, start + timedelta(hours=hours)
+
+
+def timeline_params(settings: Settings) -> dict:
     w = settings.watering
-    if totals.past_inches > w.inches_required:
+    elements = ["datetime", "precip"]
+    includes = ["days"]
+    if w.freeze_skip:
+        elements.append("tempmin")
+    if w.near_term_hours > 0:
+        includes.append("hours")
+    return {**TIMELINE_BASE, "elements": ",".join(elements), "include": ",".join(includes)}
+
+
+def past_ok(snapshot: WeatherSnapshot, settings: Settings) -> bool:
+    w = settings.watering
+    if snapshot.past_inches > w.inches_required:
         return False
-    if w.event_inches > 0 and totals.max_daily_inches >= w.event_inches:
+    if w.event_inches > 0 and snapshot.max_daily_inches >= w.event_inches:
         return False
     return True
 
 
-def allow_watering(totals: PrecipTotals, settings: Settings) -> bool:
+def allow_watering(snapshot: WeatherSnapshot, settings: Settings) -> bool:
     w = settings.watering
-    forecast_ok = totals.forecast_inches <= w.forecast_inches_max
-    return past_ok(totals, settings) and forecast_ok
+    if snapshot.freeze_block:
+        return False
+    if w.near_term_hours > 0 and snapshot.near_term_inches > w.near_term_inches_max:
+        return False
+    if snapshot.forecast_inches > w.forecast_inches_max:
+        return False
+    return past_ok(snapshot, settings)
 
 
 def update_blocked_until(
@@ -112,13 +147,7 @@ def seconds_until_next_check(settings: Settings, *, now: datetime | None = None)
     if settings.watering.updates_per_day != 1:
         return settings.watering.interval_seconds
 
-    tz = ZoneInfo(settings.location.timezone)
-    current = now or datetime.now(tz)
-    if current.tzinfo is None:
-        current = current.replace(tzinfo=tz)
-    else:
-        current = current.astimezone(tz)
-
+    current = local_now(settings, now)
     w = settings.watering
     target = current.replace(
         hour=w.check_hour,
@@ -131,7 +160,11 @@ def seconds_until_next_check(settings: Settings, *, now: datetime | None = None)
     return (target - current).total_seconds()
 
 
-def fetch_precip(settings: Settings) -> PrecipTotals:
+def fetch_precip(settings: Settings) -> WeatherSnapshot:
+    return fetch_weather(settings)
+
+
+def fetch_weather(settings: Settings, *, now: datetime | None = None) -> WeatherSnapshot:
     api_start, api_end = timeline_window(settings)
     past_start, past_end = past_window(settings)
     forecast = forecast_window(settings)
@@ -142,6 +175,7 @@ def fetch_precip(settings: Settings) -> PrecipTotals:
         loc.longitude,
         api_start,
         api_end,
+        settings=settings,
         api_key=settings.weather.api_key,
         timeout=timeout,
     )
@@ -159,35 +193,49 @@ def fetch_precip(settings: Settings) -> PrecipTotals:
         forecast_start, forecast_end = forecast
         forecast_inches = _sum_precip(daily, forecast_start, forecast_end)
 
+    today = local_today(loc)
+    freeze_block = _freeze_block(daily, settings, today)
+    near_term_inches = 0.0
+    window = near_term_window(settings, now)
+    if window is not None:
+        hourly = payload.get("hours")
+        if not isinstance(hourly, list):
+            raise requests.RequestException("visual crossing response missing hourly data")
+        near_term_inches = _sum_precip_hours(hourly, window[0], window[1], loc.timezone)
+
     w = settings.watering
-    if forecast is None:
-        logger.info(
-            "visual_crossing past %.2f in (max day %.2f, %s to %s); "
-            "allow if past <= %.2f in and no day >= %.2f in",
-            past_inches,
-            max_daily,
+    logger.info(
+        "visual_crossing past %.2f in (max day %.2f), forecast %.2f in, "
+        "near_term %.2f in / %sh, freeze_block=%s; "
+        "allow if past<=%.2f, event>=%.2f blocks, forecast<=%.2f, "
+        "near_term<=%.2f, freeze_skip=%s",
+        past_inches,
+        max_daily,
+        forecast_inches,
+        near_term_inches,
+        w.near_term_hours,
+        freeze_block,
+        w.inches_required,
+        w.event_inches,
+        w.forecast_inches_max,
+        w.near_term_inches_max,
+        w.freeze_skip,
+    )
+    if forecast_start is not None:
+        logger.debug(
+            "windows past=%s..%s forecast=%s..%s",
             past_start,
             past_end,
-            w.inches_required,
-            w.event_inches,
-        )
-    else:
-        logger.info(
-            "visual_crossing past %.2f in (max day %.2f, %s to %s), "
-            "forecast %.2f in (%s to %s); allow if past <= %.2f, no day >= %.2f, "
-            "forecast <= %.2f",
-            past_inches,
-            max_daily,
-            past_start,
-            past_end,
-            forecast_inches,
             forecast_start,
             forecast_end,
-            w.inches_required,
-            w.event_inches,
-            w.forecast_inches_max,
         )
-    return PrecipTotals(past_inches, forecast_inches, max_daily)
+    return WeatherSnapshot(
+        past_inches,
+        forecast_inches,
+        max_daily,
+        near_term_inches,
+        freeze_block,
+    )
 
 
 def decide(
@@ -201,7 +249,7 @@ def decide(
     blocked_until = state.blocked_until
 
     try:
-        totals = fetch_precip(settings)
+        snapshot = fetch_weather(settings)
     except requests.RequestException as exc:
         logger.warning("weather failed; fail_mode=%s", settings.runtime.fail_mode)
         keep = (
@@ -217,17 +265,22 @@ def decide(
             str(exc),
         )
 
-    weather_allow = allow_watering(totals, settings)
+    weather_allow = allow_watering(snapshot, settings)
     blocked_until = update_blocked_until(
         today,
-        past_ok_flag=past_ok(totals, settings),
+        past_ok_flag=past_ok(snapshot, settings),
         rain_delay_days=settings.watering.rain_delay_days,
         blocked_until=blocked_until,
     )
     required = watering_required(today, weather_allow, blocked_until)
+    if snapshot.freeze_block:
+        logger.info(
+            "freeze skip active (tempmin below %.1f F today or tomorrow)",
+            settings.watering.freeze_temp_f,
+        )
     if blocked_until and today <= blocked_until and weather_allow:
         logger.info("rain delay active through %s; watering blocked", blocked_until)
-    return required, totals.past_inches, totals.forecast_inches, blocked_until, True, None
+    return required, snapshot.past_inches, snapshot.forecast_inches, blocked_until, True, None
 
 
 def _timeline_url(lat: float, lon: float, start: date, end: date) -> str:
@@ -240,12 +293,13 @@ def _get_timeline(
     start: date,
     end: date,
     *,
+    settings: Settings,
     api_key: str,
     timeout: int,
 ) -> dict:
     return _get(
         _timeline_url(lat, lon, start, end),
-        params={**TIMELINE_QUERY, "key": api_key},
+        params={**timeline_params(settings), "key": api_key},
         timeout=timeout,
     )
 
@@ -287,6 +341,58 @@ def _log_timeline_meta(payload: dict, settings: Settings) -> None:
             config_tz,
             api_tz,
         )
+
+
+def _parse_vc_datetime(raw: str, timezone: str) -> datetime:
+    tz = ZoneInfo(timezone)
+    text = str(raw).strip().replace(" ", "T")
+    if len(text) == 10:
+        text = f"{text}T00:00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=tz)
+    return parsed.astimezone(tz)
+
+
+def _freeze_block(daily: list, settings: Settings, today: date) -> bool:
+    if not settings.watering.freeze_skip:
+        return False
+    threshold = settings.watering.freeze_temp_f
+    watch = {today.isoformat(), (today + timedelta(days=1)).isoformat()}
+    for day in daily:
+        raw = day.get("datetime")
+        if not raw:
+            continue
+        day_s = str(raw)[:10]
+        if day_s not in watch:
+            continue
+        tempmin = day.get("tempmin")
+        if tempmin is not None and float(tempmin) < threshold:
+            return True
+    return False
+
+
+def _sum_precip_hours(hours: list, start: datetime, end: datetime, timezone: str) -> float:
+    if not hours:
+        raise requests.RequestException("visual crossing returned no hourly rows")
+
+    total = 0.0
+    matched = 0
+    for hour in hours:
+        raw = hour.get("datetime")
+        if not raw:
+            raise requests.RequestException("visual crossing hour missing datetime")
+        when = _parse_vc_datetime(str(raw), timezone)
+        if start <= when < end:
+            total += float(hour.get("precip") or 0)
+            matched += 1
+    if matched == 0:
+        logger.warning(
+            "visual_crossing returned no hourly rows between %s and %s",
+            start,
+            end,
+        )
+    return total
 
 
 def _max_daily_precip(days: list, start: date, end: date) -> float:
