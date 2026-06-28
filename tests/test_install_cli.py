@@ -15,13 +15,11 @@ from rain_bypass.install_cli import (
     app,
     build_settings,
     install_systemd_unit,
-    is_pi_zero,
-    is_raspberry_pi,
     main,
     prompt_settings,
+    render_systemd_unit,
     repo_root,
     run_install,
-    systemd_unit,
     validate_api_key,
     validate_zip_code,
     write_settings_secure,
@@ -83,50 +81,8 @@ def test_validate_zip_code():
         validate_zip_code("bad")
 
 
-def test_is_raspberry_pi(monkeypatch, tmp_path):
-    model = tmp_path / "model"
-    model.write_text("Raspberry Pi 4 Model B", encoding="utf-8")
-    original_path = Path
-
-    def fake_path(value: str | Path) -> Path:
-        if str(value) == "/proc/device-tree/model":
-            return model
-        return original_path(value)
-
-    monkeypatch.setattr("rain_bypass.install_cli.Path", fake_path)
-    assert is_raspberry_pi() is True
-
-
-def test_is_raspberry_pi_not_pi(monkeypatch, tmp_path):
-    model = tmp_path / "model"
-    model.write_text("Not a Pi", encoding="utf-8")
-    original_path = Path
-
-    def fake_path(value: str | Path) -> Path:
-        if str(value) == "/proc/device-tree/model":
-            return model
-        return original_path(value)
-
-    monkeypatch.setattr("rain_bypass.install_cli.Path", fake_path)
-    assert is_raspberry_pi() is False
-
-
-def test_is_pi_zero(monkeypatch, tmp_path):
-    model = tmp_path / "model"
-    model.write_text("Raspberry Pi Zero W Rev 1.1", encoding="utf-8")
-    original_path = Path
-
-    def fake_path(value: str | Path) -> Path:
-        if str(value) == "/proc/device-tree/model":
-            return model
-        return original_path(value)
-
-    monkeypatch.setattr("rain_bypass.install_cli.Path", fake_path)
-    assert is_pi_zero() is True
-
-
-def test_systemd_unit():
-    text = systemd_unit(
+def test_render_systemd_unit():
+    text = render_systemd_unit(
         Path("/opt/app"),
         Path("/opt/app/.venv/bin/python"),
         Path("/opt/app/settings.toml"),
@@ -135,6 +91,21 @@ def test_systemd_unit():
     assert "WorkingDirectory=/opt/app" in text
     assert "User=root" in text
     assert "MemoryMax=256M" in text
+    assert "@ROOT@" not in text
+
+
+def test_render_systemd_unit_missing_template(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.systemd_template_path",
+        lambda: tmp_path / "missing.service.in",
+    )
+    with pytest.raises(FileNotFoundError, match="systemd template not found"):
+        render_systemd_unit(
+            Path("/opt/app"),
+            Path("/opt/app/.venv/bin/python"),
+            Path("/opt/app/settings.toml"),
+            "root",
+        )
 
 
 def test_prompt_settings_builds_toml(tmp_path, monkeypatch):

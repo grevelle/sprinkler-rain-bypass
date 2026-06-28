@@ -191,10 +191,16 @@ Verify relay behavior with your controller before unattended use. Match relay ra
 
 ## systemd
 
-`./install.sh` can install the service with correct paths for your install directory. To install manually, edit `deploy/rain-bypass.service` (paths and `.venv` python), then:
+`./install.sh` installs the service with paths for your install directory. The unit template is `deploy/rain-bypass.service.in` (placeholders `@ROOT@`, `@PYTHON@`, `@SETTINGS@`, `@USER@`).
+
+Manual install: substitute placeholders, then:
 
 ```bash
-sudo cp deploy/rain-bypass.service /etc/systemd/system/
+sed -e 's|@ROOT@|/opt/sprinkler-rain-bypass|g' \
+    -e 's|@PYTHON@|/opt/sprinkler-rain-bypass/.venv/bin/python|g' \
+    -e 's|@SETTINGS@|/opt/sprinkler-rain-bypass/settings.toml|g' \
+    -e 's|@USER@|root|g' \
+    deploy/rain-bypass.service.in | sudo tee /etc/systemd/system/rain-bypass.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now rain-bypass
 ```

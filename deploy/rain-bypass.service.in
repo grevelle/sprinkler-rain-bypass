@@ -1,4 +1,4 @@
-# Template — paths are filled by rain-bypass-install. Manual install: edit ExecStart and WorkingDirectory.
+# Template — placeholders @ROOT@ @PYTHON@ @SETTINGS@ @USER@ filled by rain-bypass-install.
 [Unit]
 Description=Sprinkler rain bypass controller
 After=network-online.target
@@ -6,10 +6,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/opt/sprinkler-rain-bypass
+User=@USER@
+WorkingDirectory=@ROOT@
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/sprinkler-rain-bypass/.venv/bin/python -m rain_bypass --config /opt/sprinkler-rain-bypass/settings.toml
+ExecStart=@PYTHON@ -m rain_bypass --config @SETTINGS@
 Restart=on-failure
 RestartSec=300
 # Pi Zero W (512 MB RAM): cap this service and deprioritize vs other workloads.

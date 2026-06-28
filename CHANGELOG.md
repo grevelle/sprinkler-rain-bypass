@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default `weather_timeout_seconds` increased to **45** for slow Pi Zero W Wi‑Fi.
 - Installer uses `settings.example.toml` defaults, resolves **ZIP code → location** via Visual Crossing, and only requires the **API key**; other confirms default to yes on Enter.
 - **No version pins** anywhere: unpinned Python deps, GitHub Actions on `@main`, pre-commit on `main`, CI uses latest Python 3.x with `pip install --upgrade`.
+- **DRY:** `deploy/rain-bypass.service.in` is the single systemd template; Pi detection lives in `rain_bypass.platform` (bash keeps a minimal pre-venv copy).
 
 ## [4.0.0] - 2025-06-27
 

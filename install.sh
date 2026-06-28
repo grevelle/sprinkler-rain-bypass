@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+# Must match rain_bypass/platform.py (runs before the venv exists).
 is_raspberry_pi() {
   if [[ ! -r /proc/device-tree/model ]]; then
     return 1
@@ -95,13 +96,6 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 install_missing_packages
-
-if is_raspberry_pi; then
-  MODEL="$(tr -d '\0' < /proc/device-tree/model)"
-  if [[ "${MODEL}" == *[Zz]ero* ]]; then
-    printf 'Pi Zero detected — pip install may take 10–20 minutes.\n'
-  fi
-fi
 
 if [[ ! -d "${ROOT}/.venv" ]]; then
   python3 -m venv "${ROOT}/.venv"

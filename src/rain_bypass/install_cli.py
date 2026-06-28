@@ -13,6 +13,7 @@ import typer
 
 from rain_bypass.config import Settings, load_settings
 from rain_bypass.controller import run
+from rain_bypass.platform import is_pi_zero, is_raspberry_pi
 from rain_bypass.settings_io import load_example_settings, write_settings
 from rain_bypass.weather import resolve_location, weather_api_smoke
 
@@ -50,25 +51,21 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def read_pi_model() -> str | None:
-    model = Path("/proc/device-tree/model")
-    if not model.is_file():
-        return None
-    return model.read_text(encoding="utf-8", errors="ignore").strip("\0")
+def systemd_template_path() -> Path:
+    return repo_root() / "deploy" / "rain-bypass.service.in"
 
 
-def is_raspberry_pi() -> bool:
-    model = read_pi_model()
-    if model is None:
-        return False
-    return "raspberry" in model.lower()
-
-
-def is_pi_zero() -> bool:
-    model = read_pi_model()
-    if model is None:
-        return False
-    return "zero" in model.lower()
+def render_systemd_unit(root: Path, python: Path, settings: Path, service_user: str) -> str:
+    template = systemd_template_path()
+    if not template.is_file():
+        raise FileNotFoundError(f"systemd template not found: {template}")
+    text = template.read_text(encoding="utf-8")
+    return (
+        text.replace("@ROOT@", root.as_posix())
+        .replace("@PYTHON@", python.as_posix())
+        .replace("@SETTINGS@", settings.as_posix())
+        .replace("@USER@", service_user)
+    )
 
 
 def validate_api_key(key: str) -> str:
@@ -134,33 +131,6 @@ def write_settings_secure(path: Path, settings: Settings) -> None:
         os.chmod(path, 0o600)
 
 
-def systemd_unit(root: Path, python: Path, settings: Path, service_user: str) -> str:
-    root_s = root.as_posix()
-    python_s = python.as_posix()
-    settings_s = settings.as_posix()
-    return f"""[Unit]
-Description=Sprinkler rain bypass controller
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User={service_user}
-WorkingDirectory={root_s}
-Environment=PYTHONUNBUFFERED=1
-ExecStart={python_s} -m rain_bypass --config {settings_s}
-Restart=on-failure
-RestartSec=300
-# Pi Zero W (512 MB RAM): cap this service and deprioritize vs other workloads.
-MemoryMax=256M
-Nice=5
-TimeoutStartSec=120
-
-[Install]
-WantedBy=multi-user.target
-"""
-
-
 def install_systemd_unit(
     root: Path,
     python: Path,
@@ -189,7 +159,7 @@ def install_systemd_unit(
     typer.echo(f"==> Installing {unit_path} (requires sudo)")
     runner(
         ["sudo", "tee", str(unit_path)],
-        input=systemd_unit(root, python, settings, service_user).encode(),
+        input=render_systemd_unit(root, python, settings, service_user).encode(),
         check=True,
     )
     runner(["sudo", "systemctl", "daemon-reload"], check=True)
