@@ -88,13 +88,6 @@ class State(FrozenModel):
         path.write_text(self.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
-class Decision(FrozenModel):
-    watering_required: bool
-    rainfall_inches: float | None
-    in_season: bool
-    error: str | None = None
-
-
 def local_today(location: Location) -> date:
     return datetime.now(ZoneInfo(location.timezone)).date()
 
@@ -105,7 +98,10 @@ def load_settings(config_path: Path | str) -> Settings:
         raise ConfigError(f"Config not found: {path}. Copy settings.example.toml to settings.toml.")
 
     with path.open("rb") as handle:
-        data = tomllib.load(handle)
+        try:
+            data = tomllib.load(handle)
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigError(str(exc)) from exc
 
     try:
         return Settings.model_validate(data)

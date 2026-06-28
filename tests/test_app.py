@@ -1,11 +1,31 @@
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pytest
+import responses
 
-from rain_bypass.app import decide, in_season, run
-from rain_bypass.config import Decision, FailMode, Season, State, load_settings
-from rain_bypass.weather import WeatherError, precip_window
+from rain_bypass.app import (
+    ARCHIVE_URL,
+    FORECAST_URL,
+    Decision,
+    WeatherError,
+    decide,
+    fetch_precip,
+    in_season,
+    precip_window,
+    run,
+)
+from rain_bypass.config import FailMode, Season, State, load_settings
+
+
+def _weather_error(_settings):
+    raise WeatherError("x")
+
+
+@contextmanager
+def _noop_pins(_gpio):
+    yield SimpleNamespace(apply=lambda _required: None)
 
 
 def test_precip_window(settings):
@@ -38,13 +58,27 @@ def test_fail_mode_keep_last_state(settings, monkeypatch):
         }
     )
     state = State(watering_required=True, rainfall_inches=0.1)
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", _weather_error)
+    assert decide(settings, state).watering_required is True
 
-    def _fail(_settings):
-        raise WeatherError("offline")
 
-    monkeypatch.setattr("rain_bypass.app.fetch_precip", _fail)
-    decision = decide(settings, state)
+def test_fail_safe(settings, monkeypatch):
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", _weather_error)
+    decision = decide(settings, State(watering_required=True, rainfall_inches=0.1))
+    assert decision.watering_required is False
+    assert decision.error == "x"
+
+
+def test_watering_required(settings, monkeypatch):
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 0.1)
+    decision = decide(settings, State())
     assert decision.watering_required is True
+    assert decision.rainfall_inches == pytest.approx(0.1)
+
+
+def test_watering_blocked(settings, monkeypatch):
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 2.0)
+    assert decide(settings, State()).watering_required is False
 
 
 def test_state_round_trip(tmp_path):
@@ -54,7 +88,64 @@ def test_state_round_trip(tmp_path):
     assert State.load(path).rainfall_inches == pytest.approx(0.25)
 
 
-def test_run_persists_state(tmp_path, settings_path):
+@responses.activate
+def test_fetch_precip_forecast(settings, monkeypatch):
+    today = date.today()
+    monkeypatch.setattr(
+        "rain_bypass.app.precip_window",
+        lambda _s: (today - timedelta(days=2), today),
+    )
+    payload = {
+        "daily": {
+            "time": [(today - timedelta(days=2)).isoformat(), today.isoformat()],
+            "precipitation_sum": [2.0, 3.0],
+        }
+    }
+    responses.add(responses.GET, FORECAST_URL, json=payload, status=200)
+    assert fetch_precip(settings) == pytest.approx(5 / 25.4)
+
+
+@responses.activate
+def test_fetch_precip_forecast_falls_back_to_archive(settings, monkeypatch):
+    today = date.today()
+    monkeypatch.setattr(
+        "rain_bypass.app.precip_window",
+        lambda _s: (today - timedelta(days=2), today),
+    )
+    archive_payload = {
+        "daily": {
+            "time": [(today - timedelta(days=2)).isoformat(), today.isoformat()],
+            "precipitation_sum": [1.0, 2.0],
+        }
+    }
+    responses.add(responses.GET, FORECAST_URL, json={"daily": {}}, status=200)
+    responses.add(responses.GET, ARCHIVE_URL, json=archive_payload, status=200)
+    assert fetch_precip(settings) == pytest.approx(3 / 25.4)
+
+
+@responses.activate
+def test_fetch_precip_archive(settings, monkeypatch):
+    monkeypatch.setattr(
+        "rain_bypass.app.precip_window",
+        lambda _s: (date(2020, 1, 1), date(2020, 1, 3)),
+    )
+    payload = {"daily": {"time": ["2020-01-01", "2020-01-02"], "precipitation_sum": [1.0, 2.0]}}
+    responses.add(responses.GET, ARCHIVE_URL, json=payload, status=200)
+    assert fetch_precip(settings) == pytest.approx(3 / 25.4)
+
+
+@responses.activate
+def test_fetch_precip_http_error(settings, monkeypatch):
+    monkeypatch.setattr(
+        "rain_bypass.app.precip_window",
+        lambda _s: (date(2020, 1, 1), date(2020, 1, 3)),
+    )
+    responses.add(responses.GET, ARCHIVE_URL, status=500)
+    with pytest.raises(WeatherError):
+        fetch_precip(settings)
+
+
+def test_run_once(tmp_path, settings_path):
     state_path = tmp_path / "state.json"
     settings_path.write_text(
         settings_path.read_text(encoding="utf-8")
@@ -63,15 +154,18 @@ def test_run_persists_state(tmp_path, settings_path):
         encoding="utf-8",
     )
     settings = load_settings(settings_path)
-
-    @contextmanager
-    def noop_pins(_gpio):
-        class Driver:
-            def apply(self, _required): ...
-
-        yield Driver()
-
-    run(settings, once=True, pin_factory=noop_pins)
+    run(settings, once=True, pin_factory=_noop_pins)
     saved = State.load(state_path)
     assert saved.watering_required is False
     assert saved.last_weather_update is not None
+
+
+def test_run_loop(settings, monkeypatch):
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 0.0)
+
+    def _stop(_seconds):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("rain_bypass.app.time.sleep", _stop)
+    with pytest.raises(KeyboardInterrupt):
+        run(settings, pin_factory=_noop_pins)

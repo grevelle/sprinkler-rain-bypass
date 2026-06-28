@@ -32,6 +32,10 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
 
+## Code
+
+Four modules: `config` (settings), `app` (weather + logic), `gpio`, `__main__` (CLI). 100% test coverage enforced in CI.
+
 ## Hardware
 
 [docs/hardware.md](docs/hardware.md)
