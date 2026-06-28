@@ -27,12 +27,7 @@ def compute_deficit(
     irrigation_mtd: float,
     forecast_inches: float,
 ) -> float:
-    return (
-        target_to_date(today, settings)
-        - rain_mtd
-        - irrigation_mtd
-        - forecast_inches
-    )
+    return target_to_date(today, settings) - rain_mtd - irrigation_mtd - forecast_inches
 
 
 def balance_allows_watering(
