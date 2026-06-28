@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev,gpio]"
+      - run: pip install -e ".[dev]"
       - run: pre-commit run --all-files
       - run: pyright
       - run: pytest -q --cov-fail-under=100

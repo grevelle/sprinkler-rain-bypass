@@ -767,9 +767,19 @@ def test_pi_pins(fake_rpi, pi_gpio):
 
 
 def test_watering_pins_requires_gpio_extra(pi_gpio):
-    with pytest.raises(RuntimeError, match="gpio.mock"):
-        with watering_pins(pi_gpio):
-            pass
+    import importlib
+
+    real_import = importlib.import_module
+
+    def fake_import(name: str, package: str | None = None) -> object:
+        if name == "RPi.GPIO":
+            raise ImportError("RPi.GPIO not installed")
+        return real_import(name, package)
+
+    with patch("importlib.import_module", fake_import):
+        with pytest.raises(RuntimeError, match="gpio.mock"):
+            with watering_pins(pi_gpio):
+                pass
 
 
 def test_watering_pins_pi_cleanup(fake_rpi, pi_gpio):
