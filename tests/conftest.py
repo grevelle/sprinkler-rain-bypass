@@ -33,6 +33,13 @@ start_day = 7
 end_month = 10
 end_day = 7
 
+[sewer]
+protect = true
+start_month = 1
+start_day = 16
+end_month = 3
+end_day = 15
+
 [weather]
 api_key = "test-key"
 

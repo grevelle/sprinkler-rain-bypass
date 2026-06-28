@@ -38,7 +38,8 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 | ---------- | ----------------------------------------------------------------------- |
 | `location` | `latitude`, `longitude`, `timezone` (IANA name, e.g. `America/Chicago`) |
 | `watering` | `inches_required`, `past_days`, `forecast_days`, `forecast_inches_max`, `event_inches`, `rain_delay_days`, `near_term_hours`, `near_term_inches_max`, `freeze_skip`, `freeze_temp_f`, `check_hour`, `check_minute`, `updates_per_day` |
-| `season`   | `start_month/day`, `end_month/day`                                      |
+| `season`   | `start_month/day`, `end_month/day` (must not overlap `[sewer]`)         |
+| `sewer`    | `protect`, `start_month/day`, `end_month/day` — hard block window       |
 | `weather`  | `api_key` (Visual Crossing Timeline API)                                |
 | `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`        |
 | `runtime`  | `state_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`       |
@@ -46,7 +47,19 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
 
-**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** — Hydrawise cumulative (1.5″ / 3d), Rain Bird forecast (0.5″ / 2d) + delay (2d), UF/IFAS event (¼″), Rachio near-term (¼″ / 24h), freeze skip (32°F), check at **4:30 AM**, season **May 7–Oct 7**.
+**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** — irrigation season **May 7–Oct 7** only; **sewer baseline lockout Jan 16–Mar 15** (city sets annual sewer cap from winter water use on the April bill).
+
+### Sewer baseline protection
+
+Many municipalities (including Hartland/Waukesha) set **annual sewer charges from water used January 16 through March 15** (shown on April utility bills). Any irrigation on the same water meter during that window increases your sewer bill for the **entire year**.
+
+When `sewer.protect = true` (default, always on via `./install.sh`):
+
+- Watering is **hard blocked** during the sewer baseline window — before weather checks, season checks, or fail-mode logic.
+- The relay stays in **block** mode; no API call is made.
+- Config validation **rejects** a `[season]` range that overlaps the sewer window.
+
+Keep `[season]` entirely outside Jan 16–Mar 15. Defaults (May 7–Oct 7) satisfy this.
 
 ### Weather behavior
 

@@ -29,10 +29,20 @@ updates_per_day = 1
 
 [season]
 # Hartland 53029 — Almanac avg. last spring frost May 7, first fall frost Oct 7.
+# Must NOT overlap the sewer baseline window below (inflates annual sewer charges).
 start_month = 5
 start_day = 7
 end_month = 10
 end_day = 7
+
+[sewer]
+# Hartland/Waukesha: annual sewer usage is set from Jan 16–Mar 15 water use (April bill).
+# Hard block — watering never allowed in this window when protect = true.
+protect = true
+start_month = 1
+start_day = 16
+end_month = 3
+end_day = 15
 
 [weather]
 api_key = "YOUR_VISUAL_CROSSING_API_KEY"

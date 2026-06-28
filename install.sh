@@ -25,6 +25,11 @@ SERVICE_NAME="rain-bypass"
 # Location defaults: Hartland, WI 53029 (Waukesha County zip centroid).
 # Frost dates (Almanac / nearest Waukesha station): last spring ~May 7, first fall ~Oct 7.
 # - season May 7–Oct 7: Hartland turf irrigation window aligned to local frost normals.
+# - sewer Jan 16–Mar 15 protect: city sets annual sewer cap from winter water use (April bill).
+DEFAULT_SEWER_START_MONTH="1"
+DEFAULT_SEWER_START_DAY="16"
+DEFAULT_SEWER_END_MONTH="3"
+DEFAULT_SEWER_END_DAY="15"
 DEFAULT_LATITUDE="43.106"
 DEFAULT_LONGITUDE="-88.351"
 DEFAULT_TIMEZONE="America/Chicago"
@@ -137,12 +142,22 @@ collect_settings() {
   prompt UPDATES_PER_DAY "Weather checks per day (1 aligns to check hour above)" "$DEFAULT_UPDATES_PER_DAY"
 
   echo
-  info "Watering season (rain bypass active only between these dates)"
-  echo "  Default May 7–Oct 7 matches Hartland (53029) average frost dates."
+  info "Watering season (must NOT overlap sewer baseline window below)"
+  echo "  Default May 7–Oct 7 matches Hartland frost dates and clears Jan 16–Mar 15."
   prompt SEASON_START_MONTH "Season start month (1-12)" "$DEFAULT_SEASON_START_MONTH"
   prompt SEASON_START_DAY "Season start day (1-31)" "$DEFAULT_SEASON_START_DAY"
   prompt SEASON_END_MONTH "Season end month (1-12)" "$DEFAULT_SEASON_END_MONTH"
   prompt SEASON_END_DAY "Season end day (1-31)" "$DEFAULT_SEASON_END_DAY"
+
+  echo
+  info "Sewer baseline protection (required — blocks ALL watering in this window)"
+  echo "  City sewer charge is based on water use Jan 16–Mar 15 (April utility bill)."
+  echo "  Any irrigation on your water meter during that window raises sewer rates all year."
+  echo "  protect is always enabled; only adjust dates if your municipality differs."
+  prompt SEWER_START_MONTH "Sewer baseline start month (1-12)" "$DEFAULT_SEWER_START_MONTH"
+  prompt SEWER_START_DAY "Sewer baseline start day (1-31)" "$DEFAULT_SEWER_START_DAY"
+  prompt SEWER_END_MONTH "Sewer baseline end month (1-12)" "$DEFAULT_SEWER_END_MONTH"
+  prompt SEWER_END_DAY "Sewer baseline end day (1-31)" "$DEFAULT_SEWER_END_DAY"
 
   echo
   info "Visual Crossing API (free key: https://www.visualcrossing.com/weather-api)"
@@ -204,6 +219,13 @@ start_month = ${SEASON_START_MONTH}
 start_day = ${SEASON_START_DAY}
 end_month = ${SEASON_END_MONTH}
 end_day = ${SEASON_END_DAY}
+
+[sewer]
+protect = true
+start_month = ${SEWER_START_MONTH}
+start_day = ${SEWER_START_DAY}
+end_month = ${SEWER_END_MONTH}
+end_day = ${SEWER_END_DAY}
 
 [weather]
 api_key = "${API_KEY}"

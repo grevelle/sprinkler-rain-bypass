@@ -11,7 +11,15 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from rain_bypass.config import FailMode, Season, Settings, State, load_settings, local_today
+from rain_bypass.config import (
+    FailMode,
+    Settings,
+    State,
+    in_season,
+    in_sewer_baseline_window,
+    load_settings,
+    local_today,
+)
 from rain_bypass.gpio import PinFactory, watering_pins
 
 logger = logging.getLogger(__name__)
@@ -32,12 +40,6 @@ class WeatherSnapshot(NamedTuple):
 
 # Backward-compatible alias for tests and callers expecting precip totals only.
 PrecipTotals = WeatherSnapshot
-
-
-def in_season(season: Season, today: date) -> bool:
-    start = date(today.year, season.start_month, season.start_day)
-    end = date(today.year, season.end_month, season.end_day)
-    return start <= today <= end if start <= end else today >= start or today <= end
 
 
 def past_window(settings: Settings) -> tuple[date, date]:
@@ -242,10 +244,23 @@ def decide(
     settings: Settings, state: State
 ) -> tuple[bool, float | None, float | None, date | None, bool, str | None]:
     """Return (watering_required, past_inches, forecast_inches, blocked_until, in_season, error)."""
-    if not in_season(settings.season, local_today(settings.location)):
+    today = local_today(settings.location)
+
+    if in_sewer_baseline_window(settings.sewer, today):
+        sewer = settings.sewer
+        logger.info(
+            "sewer baseline window (%02d/%02d-%02d/%02d); "
+            "watering blocked to protect annual sewer cap",
+            sewer.start_month,
+            sewer.start_day,
+            sewer.end_month,
+            sewer.end_day,
+        )
         return False, None, None, state.blocked_until, False, None
 
-    today = local_today(settings.location)
+    if not in_season(settings.season, today):
+        return False, None, None, state.blocked_until, False, None
+
     blocked_until = state.blocked_until
 
     try:

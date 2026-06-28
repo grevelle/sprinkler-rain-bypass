@@ -20,7 +20,6 @@ from rain_bypass.app import (
     fetch_precip,
     fetch_weather,
     forecast_window,
-    in_season,
     main,
     past_ok,
     past_window,
@@ -32,7 +31,17 @@ from rain_bypass.app import (
     update_blocked_until,
     watering_required,
 )
-from rain_bypass.config import ConfigError, FailMode, Gpio, Season, State, load_settings
+from rain_bypass.config import (
+    ConfigError,
+    FailMode,
+    Gpio,
+    Season,
+    State,
+    in_date_window,
+    in_season,
+    in_sewer_baseline_window,
+    load_settings,
+)
 from rain_bypass.gpio import MockPins, PiPins, watering_pins
 
 
@@ -101,6 +110,16 @@ def test_invalid_settings(settings_path, mutator):
 def test_invalid_toml(settings_path):
     settings_path.write_text("not = valid toml [[[", encoding="utf-8")
     with pytest.raises(ConfigError):
+        load_settings(settings_path)
+
+
+def test_season_overlap_sewer_rejected(settings_path):
+    text = settings_path.read_text(encoding="utf-8")
+    text = text.replace("start_month = 5", "start_month = 2").replace(
+        "start_day = 7", "start_day = 1"
+    )
+    settings_path.write_text(text, encoding="utf-8")
+    with pytest.raises(ConfigError, match="sewer baseline"):
         load_settings(settings_path)
 
 
@@ -376,6 +395,47 @@ def test_in_season(settings):
     assert in_season(season, date(2024, 6, 1)) is True
     assert in_season(season, date(2024, 2, 1)) is False
     assert in_season(season, date(2024, 5, 15)) is True
+
+
+def test_in_sewer_baseline_window(settings):
+    sewer = settings.sewer
+    assert in_sewer_baseline_window(sewer, date(2024, 2, 1)) is True
+    assert in_sewer_baseline_window(sewer, date(2024, 1, 15)) is False
+    assert in_sewer_baseline_window(sewer, date(2024, 3, 15)) is True
+    assert in_sewer_baseline_window(sewer, date(2024, 3, 16)) is False
+    assert in_date_window(12, 1, 12, 31, date(2024, 6, 1)) is False
+
+    disabled = settings.model_copy(
+        update={"sewer": settings.sewer.model_copy(update={"protect": False})}
+    )
+    assert in_sewer_baseline_window(disabled.sewer, date(2024, 2, 1)) is False
+
+
+def test_sewer_protect_off_allows_overlapping_season(settings_path):
+    text = settings_path.read_text(encoding="utf-8")
+    text = text.replace("protect = true", "protect = false").replace(
+        "start_month = 5", "start_month = 2"
+    )
+    settings_path.write_text(text, encoding="utf-8")
+    settings = load_settings(settings_path)
+    assert settings.sewer.protect is False
+
+
+def test_decide_sewer_baseline_blocks(settings, monkeypatch, caplog):
+    fixed = date(2024, 2, 10)
+    monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: fixed)
+
+    def _no_api(_settings):
+        raise AssertionError("weather API must not run during sewer baseline window")
+
+    monkeypatch.setattr("rain_bypass.app.fetch_weather", _no_api)
+    with caplog.at_level("INFO"):
+        required, rainfall, _, _, in_season_flag, error = decide(settings, State())
+    assert required is False
+    assert rainfall is None
+    assert in_season_flag is False
+    assert error is None
+    assert "sewer baseline window" in caplog.text
 
 
 def test_out_of_season(settings):
@@ -654,14 +714,15 @@ def test_fetch_precip_connection_error(settings, monkeypatch):
         fetch_precip(settings)
 
 
-def test_run_once(tmp_path, settings_path):
+def test_run_once(tmp_path, settings_path, monkeypatch):
     state_path = tmp_path / "state.json"
     settings_path.write_text(
-        settings_path.read_text(encoding="utf-8")
-        .replace('state_path = "state.json"', f'state_path = "{state_path.as_posix()}"')
-        .replace("start_month = 5", "start_month = 12"),
+        settings_path.read_text(encoding="utf-8").replace(
+            'state_path = "state.json"', f'state_path = "{state_path.as_posix()}"'
+        ),
         encoding="utf-8",
     )
+    monkeypatch.setattr("rain_bypass.app.local_today", lambda _loc: date(2024, 2, 1))
     settings = load_settings(settings_path)
     run(settings, once=True, pin_factory=_noop_pins)
     saved = State.load(state_path)
