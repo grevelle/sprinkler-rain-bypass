@@ -5,7 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-python3 -m pip install -q -e ".[dev]"
+python3 -m pip install --upgrade pip
+python3 -m pip install --upgrade -e ".[dev]"
 pre-commit run --all-files
 pyright
 pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100

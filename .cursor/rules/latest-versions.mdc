@@ -1,0 +1,43 @@
+---
+description: Never pin dependency or toolchain versions; always install latest
+alwaysApply: true
+---
+
+# Unpinned latest versions
+
+**Never pin software versions** in this repo. No `>=`, `<=`, or upper-bound constraints in `pyproject.toml`. No `@vN` tags on GitHub Actions. No `rev: vX.Y.Z` in pre-commit (use `rev: main`). No pinned Python versions in CI (use `3.x` with `check-latest: true`).
+
+## Python packages
+
+List bare package names only in `pyproject.toml`. Every install must upgrade to latest:
+
+```bash
+pip install --upgrade pip
+pip install --upgrade -e ".[dev]"
+```
+
+Same for `./install.sh` on the Pi (`--upgrade` on pip and the package install).
+
+## GitHub Actions
+
+Use floating refs on default branches:
+
+```yaml
+- uses: actions/checkout@main
+- uses: actions/setup-python@main
+  with:
+    python-version: "3.x"
+    check-latest: true
+```
+
+## Pre-commit
+
+Local hooks call **pip-installed** tools (`ruff`, `shellcheck` via `shellcheck-py`) — no pinned hook repo revisions.
+
+## Tool config
+
+Do not set `requires-python`, Ruff `target-version`, or Pyright `pythonVersion` — let tools follow the installed runtime.
+
+## Before commit
+
+Run `.\scripts\ci.ps1` or `./scripts/ci.sh` (must pass).

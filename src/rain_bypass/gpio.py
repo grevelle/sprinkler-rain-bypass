@@ -54,7 +54,7 @@ class PiPins:
 
 
 @contextmanager
-def watering_pins(gpio: Gpio) -> Generator[PinDriver, None, None]:
+def watering_pins(gpio: Gpio) -> Generator[PinDriver]:
     if gpio.mock:
         driver: PinDriver = MockPins()
         cleanup = None

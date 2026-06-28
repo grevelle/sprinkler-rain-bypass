@@ -8,15 +8,14 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@main
+      - uses: actions/setup-python@main
         with:
-          python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
+          python-version: "3.x"
+          check-latest: true
+      - run: pip install --upgrade pip
+      - run: pip install --upgrade -e ".[dev]"
       - run: pre-commit run --all-files
       - run: pyright
       - run: pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100

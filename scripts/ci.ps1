@@ -2,7 +2,8 @@
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
-python -m pip install -q -e ".[dev]"
+python -m pip install --upgrade pip
+python -m pip install --upgrade -e ".[dev]"
 python -m pre_commit run --all-files
 python -m pyright
 python -m pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100

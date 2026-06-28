@@ -12,12 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pi Zero W tuning: safe GPIO boot state, systemd memory cap, installer/SD-card pip flags, README platform notes.
 - `install.sh` prerequisite checks on apt-based systems (python3-venv, git, Pi build packages) with optional auto-install.
 - `scripts/ci.sh` and `scripts/ci.ps1` to mirror GitHub Actions locally; pre-push hooks for Pyright and pytest; `.gitattributes` for LF shell scripts.
+- Removed Dependabot (no pinned versions to bump).
 
 ### Changed
 
 - Default `weather_timeout_seconds` increased to **45** for slow Pi Zero W Wi‑Fi.
 - Installer uses `settings.example.toml` defaults, resolves **ZIP code → location** via Visual Crossing, and only requires the **API key**; other confirms default to yes on Enter.
-- CI uses `actions/checkout@v6` and `actions/setup-python@v6` (Node.js 24) to clear runner deprecation warnings.
+- **No version pins** anywhere: unpinned Python deps, GitHub Actions on `@main`, pre-commit on `main`, CI uses latest Python 3.x with `pip install --upgrade`.
 
 ## [4.0.0] - 2025-06-27
 

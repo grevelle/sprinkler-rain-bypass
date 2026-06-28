@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
 import tomli_w
+import tomllib
 
 from rain_bypass.config import Settings
 

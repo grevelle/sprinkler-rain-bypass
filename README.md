@@ -8,7 +8,7 @@ Get a free API key at [Visual Crossing](https://www.visualcrossing.com/weather-a
 
 ## Setup
 
-On a **Raspberry Pi Zero W**, use **Raspberry Pi OS Bookworm** (32-bit is fine) so you get **Python 3.11+**. Run the interactive installer — it checks for missing apt packages (venv, git, build tools on the Pi), applies defaults from `settings.example.toml`, resolves your **ZIP code** to coordinates (default **53029**), and only requires your Visual Crossing **API key** (press Enter everywhere else):
+On a **Raspberry Pi Zero W**, use the **latest Raspberry Pi OS** (32-bit is fine). Run the interactive installer — it checks for missing apt packages (venv, git, build tools on the Pi), applies defaults from `settings.example.toml`, resolves your **ZIP code** to coordinates (default **53029**), and only requires your Visual Crossing **API key** (press Enter everywhere else):
 
 ```bash
 git clone https://github.com/grevelle/sprinkler-rain-bypass.git
@@ -30,7 +30,7 @@ cp settings.example.toml settings.toml   # edit api_key (and zip_code if not 530
 
 | Topic | Recommendation |
 | ----- | -------------- |
-| OS | Raspberry Pi OS **Bookworm** (Bullseye’s Python 3.9 is too old) |
+| OS | Latest **Raspberry Pi OS** (keep the image updated) |
 | Prerequisites | `./install.sh` checks for **python3-venv**, **git**, and on the Pi **python3-dev** + **build-essential**; offers `sudo apt-get install` if anything is missing |
 | First install | `./install.sh` on a Zero W can take **10–20 minutes** (slow CPU + SD card) |
 | Wi‑Fi | Stable connection required for Visual Crossing; default API timeout is **45 s** |
@@ -96,11 +96,11 @@ Watering is allowed only when **all** gates pass and no active rain delay remain
 
 ## Code
 
-Layered modules: `config`, `settings_io`, `windows`, `weather` (httpx), `logic`, `controller`, `gpio`, `cli`, and `install_cli`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs pre-commit, Pyright (strict), and pytest at 100% coverage on Python 3.11 and 3.12.
+Layered modules: `config`, `settings_io`, `windows`, `weather` (httpx), `logic`, `controller`, `gpio`, `cli`, and `install_cli`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs pre-commit, Pyright (strict), and pytest at 100% coverage on the latest Python 3.x.
 
 ## Development
 
-Install dev dependencies once, then enable Git hooks so CI failures are caught **before** you push:
+Dependencies are **unpinned** — every install uses `pip install --upgrade` for the latest releases. Install dev dependencies once, then enable Git hooks so CI failures are caught **before** you push:
 
 ```bash
 pip install -e ".[dev,gpio]"
@@ -117,7 +117,7 @@ Run the same checks as GitHub Actions manually (recommended on Windows before ev
 ./scripts/ci.sh
 ```
 
-If Ruff auto-fixes imports during a hook run, stage those edits and commit again. `.gitattributes` keeps `install.sh` LF so ShellCheck matches Linux CI.
+If Ruff auto-fixes imports during a hook run, stage those edits and commit again. `.gitattributes` keeps `install.sh` LF so ShellCheck matches Linux CI. Hooks use latest pip packages (`ruff`, `shellcheck-py`) — nothing is version-pinned in config files.
 
 Pyright alone: `pyright`
 
