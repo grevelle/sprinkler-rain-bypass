@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tomllib
 from datetime import date, datetime
 from enum import StrEnum
@@ -23,9 +24,18 @@ class FailMode(StrEnum):
 
 
 class Location(FrozenModel):
+    zip_code: str = Field(min_length=5, max_length=10)
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     timezone: str = "UTC"
+
+    @field_validator("zip_code")
+    @classmethod
+    def normalize_zip_code(cls, value: str) -> str:
+        text = value.strip()
+        if not re.fullmatch(r"\d{5}(?:-\d{4})?", text):
+            raise ValueError("zip_code must be 5 digits or ZIP+4")
+        return text[:5]
 
 
 class Watering(FrozenModel):

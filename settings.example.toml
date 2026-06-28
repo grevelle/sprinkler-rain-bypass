@@ -1,5 +1,6 @@
 [location]
-# Hartland, WI 53029 (Waukesha County)
+# Hartland, WI 53029 (Waukesha County) — installer resolves lat/long/timezone from zip_code.
+zip_code = "53029"
 latitude = 43.106
 longitude = -88.351
 timezone = "America/Chicago"

@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from rain_bypass.config import load_settings
+from pydantic import ValidationError
+
+from rain_bypass.config import Location, load_settings
 from rain_bypass.settings_io import (
     EXAMPLE_SETTINGS_PATH,
     load_example_settings,
@@ -22,7 +24,28 @@ def test_load_example_settings_applies_overrides():
     )
     assert settings.weather.api_key == "override-key"
     assert settings.gpio.mock is True
+    assert settings.location.zip_code == "53029"
     assert settings.location.latitude == pytest.approx(43.106)
+
+
+def test_location_rejects_invalid_zip():
+    with pytest.raises(ValidationError):
+        Location(
+            zip_code="abcde",
+            latitude=43.106,
+            longitude=-88.351,
+            timezone="America/Chicago",
+        )
+
+
+def test_location_normalizes_zip_plus_four():
+    location = Location(
+        zip_code="53029-1234",
+        latitude=43.106,
+        longitude=-88.351,
+        timezone="America/Chicago",
+    )
+    assert location.zip_code == "53029"
 
 
 def test_write_settings_round_trip(tmp_path: Path):

@@ -65,4 +65,4 @@ def seconds_until_next_check(settings: Settings, *, now: datetime | None = None)
 
 
 def timeline_location_path(location: Location) -> str:
-    return f"{location.latitude},{location.longitude}"
+    return location.zip_code

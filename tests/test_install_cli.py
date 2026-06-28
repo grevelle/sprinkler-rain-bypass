@@ -8,11 +8,12 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from rain_bypass.config import load_settings
+from rain_bypass.config import Location, load_settings
 from rain_bypass.install_cli import (
     SERVICE_NAME,
     TyperPrompter,
     app,
+    build_settings,
     install_systemd_unit,
     is_pi_zero,
     is_raspberry_pi,
@@ -22,9 +23,23 @@ from rain_bypass.install_cli import (
     run_install,
     systemd_unit,
     validate_api_key,
+    validate_zip_code,
     write_settings_secure,
 )
 from rain_bypass.settings_io import load_example_settings
+
+
+@pytest.fixture(autouse=True)
+def _stub_resolve_location(monkeypatch):
+    def fake_resolve(zip_code: str, api_key: str, *, timeout: int = 45) -> Location:
+        return Location(
+            zip_code=zip_code,
+            latitude=43.106,
+            longitude=-88.351,
+            timezone="America/Chicago",
+        )
+
+    monkeypatch.setattr("rain_bypass.install_cli.resolve_location", fake_resolve)
 
 
 @dataclass
@@ -59,6 +74,13 @@ def test_validate_api_key():
         validate_api_key("")
     with pytest.raises(typer.BadParameter, match="invalid characters"):
         validate_api_key('bad"key')
+
+
+def test_validate_zip_code():
+    assert validate_zip_code("53029") == "53029"
+    assert validate_zip_code(" 53029-1234 ") == "53029"
+    with pytest.raises(typer.BadParameter, match="ZIP code"):
+        validate_zip_code("bad")
 
 
 def test_is_raspberry_pi(monkeypatch, tmp_path):
@@ -117,26 +139,33 @@ def test_systemd_unit():
 
 def test_prompt_settings_builds_toml(tmp_path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    prompter = FakePrompter(
-        answers=[],
-        secrets=["prompted-key"],
-    )
+    prompter = FakePrompter(secrets=["prompted-key"])
     settings = prompt_settings(load_example_settings(), prompter)
     assert settings.weather.api_key == "prompted-key"
+    assert settings.location.zip_code == "53029"
     assert settings.gpio.mock is False
+    assert settings.location.latitude == pytest.approx(43.106)
+    assert prompter.text_calls == [("ZIP code", "53029")]
 
 
-def test_prompt_settings_rejects_bad_fail_mode(monkeypatch):
+def test_build_settings_uses_example_defaults(monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    settings = build_settings("my-key", "53029")
+    assert settings.weather.api_key == "my-key"
+    assert settings.location.zip_code == "53029"
+    assert settings.gpio.mock is False
+    assert settings.watering.check_hour == 4
 
-    class FailModePrompter(FakePrompter):
-        def text(self, label: str, *, default: str = "") -> str:
-            if label.startswith("Fail mode"):
-                return "bad-mode"
-            return super().text(label, default=default)
 
-    with pytest.raises(typer.BadParameter, match="fail_mode"):
-        prompt_settings(load_example_settings(), FailModePrompter(secrets=["key"]))
+def test_build_settings_mock_gpio_off_pi(monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: False)
+    settings = build_settings("my-key", "53029")
+    assert settings.gpio.mock is True
+
+
+def test_build_settings_rejects_empty_api_key():
+    with pytest.raises(typer.BadParameter, match="cannot be empty"):
+        build_settings("")
 
 
 def test_write_settings_secure(tmp_path):

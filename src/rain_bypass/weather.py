@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from rain_bypass import config
-from rain_bypass.config import Settings
+from rain_bypass.config import Location, Settings
 from rain_bypass.exceptions import WeatherError
 from rain_bypass.models import WeatherSnapshot
 from rain_bypass.windows import (
@@ -41,6 +41,33 @@ def timeline_params(settings: Settings) -> dict[str, str]:
 
 def timeline_url_for(settings: Settings, start: date, end: date) -> str:
     return f"{VISUAL_CROSSING}/{timeline_location_path(settings.location)}/{start}/{end}"
+
+
+def resolve_location(zip_code: str, api_key: str, *, timeout: int = 45) -> Location:
+    """Resolve ZIP code to coordinates and timezone via Visual Crossing."""
+    today = date.today()
+    url = f"{VISUAL_CROSSING}/{zip_code}/{today}/{today}"
+    payload = _get_json(
+        url,
+        params={
+            **TIMELINE_BASE,
+            "elements": "datetime",
+            "include": "days",
+            "key": api_key,
+        },
+        timeout=timeout,
+    )
+    latitude = payload.get("latitude")
+    longitude = payload.get("longitude")
+    timezone = payload.get("timezone")
+    if latitude is None or longitude is None or not timezone:
+        raise WeatherError("visual crossing could not resolve zip code")
+    return Location(
+        zip_code=zip_code,
+        latitude=float(latitude),
+        longitude=float(longitude),
+        timezone=str(timezone),
+    )
 
 
 def timeline_request_params(settings: Settings) -> dict[str, str]:

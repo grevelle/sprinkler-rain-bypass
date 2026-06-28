@@ -34,6 +34,7 @@ from rain_bypass.weather import (
     freeze_block_for_days,
     max_daily_precip,
     parse_vc_datetime,
+    resolve_location,
     sum_precip,
     sum_precip_hours,
     timeline_params,
@@ -69,6 +70,7 @@ def _snapshot(
 
 
 def test_load_settings(settings):
+    assert settings.location.zip_code == "53029"
     assert settings.location.latitude == pytest.approx(43.106)
     assert settings.watering.past_days == 3
     assert settings.watering.forecast_days == 2
@@ -93,6 +95,7 @@ def test_missing_config(tmp_path):
 @pytest.mark.parametrize(
     ("mutator",),
     [
+        (lambda text: text.replace('zip_code = "53029"', 'zip_code = "bad"'),),
         (lambda text: text.replace("latitude = 43.106", "latitude = not_a_number"),),
         (lambda text: text.replace("past_days = 3", "past_days = 0"),),
         (lambda text: text.replace("forecast_days = 2", "forecast_days = -1"),),
@@ -467,6 +470,36 @@ def _timeline_days(
         days.append({"datetime": cursor.isoformat(), "precip": amount, "tempmin": 40})
         cursor += timedelta(days=1)
     return days
+
+
+@respx.mock
+def test_resolve_location():
+    today = date.today()
+    url = f"https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/53029/{today}/{today}"
+    respx.get(url).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "latitude": 43.106,
+                "longitude": -88.351,
+                "timezone": "America/Chicago",
+                "days": [{"datetime": today.isoformat(), "precip": 0.0}],
+            },
+        )
+    )
+    location = resolve_location("53029", "test-key")
+    assert location.zip_code == "53029"
+    assert location.latitude == pytest.approx(43.106)
+    assert location.timezone == "America/Chicago"
+
+
+@respx.mock
+def test_resolve_location_missing_fields():
+    today = date.today()
+    url = f"https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/53029/{today}/{today}"
+    respx.get(url).mock(return_value=httpx.Response(200, json={"days": []}))
+    with pytest.raises(WeatherError, match="could not resolve zip"):
+        resolve_location("53029", "test-key")
 
 
 @respx.mock

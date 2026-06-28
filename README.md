@@ -8,7 +8,7 @@ Get a free API key at [Visual Crossing](https://www.visualcrossing.com/weather-a
 
 ## Setup
 
-On a **Raspberry Pi Zero W**, use **Raspberry Pi OS Bookworm** (32-bit is fine) so you get **Python 3.11+**. Run the interactive installer — it creates a venv, prompts for all settings, validates your API key, and optionally installs systemd:
+On a **Raspberry Pi Zero W**, use **Raspberry Pi OS Bookworm** (32-bit is fine) so you get **Python 3.11+**. Run the interactive installer — it applies defaults from `settings.example.toml`, resolves your **ZIP code** to coordinates (default **53029**), and only requires your Visual Crossing **API key** (press Enter everywhere else):
 
 ```bash
 git clone https://github.com/grevelle/sprinkler-rain-bypass.git
@@ -53,7 +53,7 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 
 | Section    | Keys                                                                                                                                                                                                                                  |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `location` | `latitude`, `longitude`, `timezone` (IANA name, e.g. `America/Chicago`)                                                                                                                                                               |
+| `location` | `zip_code` (default **53029**), plus resolved `latitude`, `longitude`, `timezone` from install |
 | `watering` | `inches_required`, `past_days`, `forecast_days`, `forecast_inches_max`, `event_inches`, `rain_delay_days`, `near_term_hours`, `near_term_inches_max`, `freeze_skip`, `freeze_temp_f`, `check_hour`, `check_minute`, `updates_per_day` |
 | `sewer`    | `start_month/day`, `end_month/day` — hard block window (annual sewer cap)                                                                                                                                                             |
 | `weather`  | `api_key` (Visual Crossing Timeline API)                                                                                                                                                                                              |

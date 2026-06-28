@@ -27,9 +27,9 @@ pytestmark = [
 ]
 
 LIVE_SITES = (
-    ("hartland", 43.106, -88.351, "America/Chicago"),
-    ("chicago", 41.8781, -87.6298, "America/Chicago"),
-    ("phoenix", 33.4484, -112.0740, "America/Phoenix"),
+    ("hartland", "53029", 43.106, -88.351, "America/Chicago"),
+    ("chicago", "60601", 41.8781, -87.6298, "America/Chicago"),
+    ("phoenix", "85004", 33.4484, -112.0740, "America/Phoenix"),
 )
 
 LIVE_SETTINGS_OVERRIDES = {
@@ -51,11 +51,16 @@ class LiveCase(NamedTuple):
 
 @pytest.fixture(params=LIVE_SITES, ids=[site[0] for site in LIVE_SITES])
 def live_case(tmp_path: Path, request: pytest.FixtureRequest) -> LiveCase:
-    name, lat, lon, tz = request.param
+    name, zip_code, lat, lon, tz = request.param
     state_path = tmp_path / f"{name}-state.json"
     config_path = tmp_path / f"{name}-settings.toml"
     settings = load_example_settings(
-        location={"latitude": lat, "longitude": lon, "timezone": tz},
+        location={
+            "zip_code": zip_code,
+            "latitude": lat,
+            "longitude": lon,
+            "timezone": tz,
+        },
         weather={"api_key": os.environ["VISUAL_CROSSING_API_KEY"]},
         runtime={"state_path": state_path.as_posix(), **LIVE_SETTINGS_OVERRIDES["runtime"]},
         watering=LIVE_SETTINGS_OVERRIDES["watering"],
