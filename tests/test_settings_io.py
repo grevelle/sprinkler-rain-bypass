@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from rain_bypass.config import Location, load_settings
+from rain_bypass.config import Balance, BalanceMonth, Location, State, load_settings
 from rain_bypass.settings_io import (
     EXAMPLE_SETTINGS_PATH,
     load_example_settings,
@@ -47,13 +47,42 @@ def test_location_normalizes_zip_plus_four():
     assert location.zip_code == "53029"
 
 
+def test_balance_monthly_validator_branches():
+    empty = Balance.model_validate({"inches_per_cycle": 0.33, "monthly": {}})
+    assert empty.monthly[6].target_inches_per_month == pytest.approx(6.5)
+    non_dict = Balance.model_validate({"inches_per_cycle": 0.33, "monthly": "ignored"})
+    assert non_dict.monthly[7].target_inches_per_month == pytest.approx(5.0)
+    preset = Balance(
+        inches_per_cycle=0.33,
+        monthly={5: BalanceMonth(target_inches_per_month=9.0)},
+    )
+    assert preset.monthly[5].target_inches_per_month == pytest.approx(9.0)
+
+
+def test_state_load_rejects_non_object(tmp_path: Path):
+    path = tmp_path / "state.json"
+    path.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValidationError):
+        State.load(path)
+
+
+def test_load_example_settings_monthly_override():
+    settings = load_example_settings(
+        weather={"api_key": "override-key"},
+        balance={"monthly": {"6": {"target_inches_per_month": 8.0}}},
+    )
+    assert settings.balance.monthly[6].target_inches_per_month == pytest.approx(8.0)
+    assert settings.balance.monthly[7].target_inches_per_month == pytest.approx(5.0)
+
+
 def test_write_settings_round_trip(tmp_path: Path):
     source = load_example_settings(weather={"api_key": "round-trip"})
     path = tmp_path / "settings.toml"
     write_settings(path, source)
     loaded = load_settings(path)
     assert loaded.weather.api_key == "round-trip"
-    assert loaded.watering.past_days == source.watering.past_days
+    assert loaded.balance.inches_per_cycle == source.balance.inches_per_cycle
+    assert loaded.watering.event_lookback_days == source.watering.event_lookback_days
 
 
 def test_load_example_settings_missing_file(tmp_path: Path, monkeypatch):

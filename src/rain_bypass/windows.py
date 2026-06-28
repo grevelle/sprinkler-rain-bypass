@@ -7,14 +7,18 @@ from rain_bypass import config
 from rain_bypass.config import Location, Settings
 
 
-def past_window(settings: Settings) -> tuple[date, date]:
+def month_start(today: date) -> date:
+    return today.replace(day=1)
+
+
+def event_lookback_window(settings: Settings) -> tuple[date, date]:
     today = config.local_today(settings.location)
-    past_days = settings.watering.past_days
-    return today - timedelta(days=past_days - 1), today
+    lookback_days = settings.watering.event_lookback_days
+    return today - timedelta(days=lookback_days - 1), today
 
 
 def forecast_window(settings: Settings) -> tuple[date, date] | None:
-    forecast_days = settings.watering.forecast_days
+    forecast_days = settings.balance.forecast_days
     if forecast_days <= 0:
         return None
     today = config.local_today(settings.location)
@@ -22,11 +26,13 @@ def forecast_window(settings: Settings) -> tuple[date, date] | None:
 
 
 def timeline_window(settings: Settings) -> tuple[date, date]:
-    past_start, past_end = past_window(settings)
+    today = config.local_today(settings.location)
+    lookback_start, lookback_end = event_lookback_window(settings)
+    api_start = min(lookback_start, month_start(today))
     forecast = forecast_window(settings)
     if forecast is None:
-        return past_start, past_end
-    return past_start, forecast[1]
+        return api_start, max(lookback_end, today)
+    return api_start, forecast[1]
 
 
 def local_now(settings: Settings, now: datetime | None = None) -> datetime:
@@ -37,20 +43,7 @@ def local_now(settings: Settings, now: datetime | None = None) -> datetime:
     return current.astimezone(tz)
 
 
-def near_term_window(
-    settings: Settings, now: datetime | None = None
-) -> tuple[datetime, datetime] | None:
-    hours = settings.watering.near_term_hours
-    if hours <= 0:
-        return None
-    start = local_now(settings, now)
-    return start, start + timedelta(hours=hours)
-
-
 def seconds_until_next_check(settings: Settings, *, now: datetime | None = None) -> float:
-    if settings.watering.updates_per_day != 1:
-        return settings.watering.interval_seconds
-
     current = local_now(settings, now)
     w = settings.watering
     target = current.replace(

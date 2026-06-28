@@ -1,6 +1,6 @@
 # Sprinkler Rain Bypass
 
-Raspberry Pi controller that checks recent rainfall (Visual Crossing) and drives a relay plus status LEDs for your irrigation rain-bypass input.
+Raspberry Pi controller that sets a rain-bypass relay **ON or OFF** before each irrigation cycle using seasonal Kentucky bluegrass balance, month-to-date rain, and forecast — plus freeze and storm safety gates.
 
 **Target hardware:** Raspberry Pi Zero W (also works on other Pi models with BCM GPIO).
 
@@ -55,7 +55,8 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 | Section    | Keys                                                                                                                                                                                                                                  |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `location` | `zip_code` (default **53029**), plus resolved `latitude`, `longitude`, `timezone` from install |
-| `watering` | `inches_required`, `past_days`, `forecast_days`, `forecast_inches_max`, `event_inches`, `rain_delay_days`, `near_term_hours`, `near_term_inches_max`, `freeze_skip`, `freeze_temp_f`, `check_hour`, `check_minute`, `updates_per_day` |
+| `balance`  | `inches_per_cycle` (calibrate with catch cups); optional `forecast_days`, `[balance.monthly]` overrides |
+| `watering` | `check_hour`, `check_minute`; optional `event_lookback_days`, `event_inches`, `freeze_temp_f` |
 | `sewer`    | `start_month/day`, `end_month/day` — hard block window (annual sewer cap)                                                                                                                                                             |
 | `weather`  | `api_key` (Visual Crossing Timeline API)                                                                                                                                                                                              |
 | `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`                                                                                                                                                                      |
@@ -64,7 +65,17 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
 
-**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** — **sewer lockout Jan 16–Mar 15** (city sets annual sewer cap from winter water use on the April bill). Irrigation schedule timing is left to your controller; this app only enforces the sewer window plus rain-skip logic.
+**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** — **sewer lockout Jan 16–Mar 15**; **`balance.inches_per_cycle = 0.33`** (calibrate after install). Rain Bird should run **one daily program**; this app toggles the bypass sensor before that cycle.
+
+### Rain Bird setup
+
+1. Set **one program** with your zones and run times.
+2. Schedule the program **every day** at your preferred morning time.
+3. Wire the bypass relay to the rain-sensor terminals (COM/NO as a dry contact).
+4. The Pi check runs at **4:30 AM** by default so the relay state is set **before** the morning cycle.
+5. **Calibrate `[balance].inches_per_cycle`** once with a catch-cup test on a full program run.
+
+Relay **open** (green LED) = dry sensor = watering **allowed**. Relay **closed** (red LED) = wet sensor = cycle **skipped**.
 
 ### Sewer lockout
 
@@ -75,28 +86,33 @@ During the sewer lockout window:
 - Watering is **hard blocked** — before weather checks or fail-mode logic.
 - The relay stays in **block** mode; no API call is made.
 
-### Weather behavior
+### How watering is decided
 
-The app uses **six gates** before allowing watering:
+Two layers run each morning check:
 
-1. **Past window** — cumulative rain through today vs `inches_required` (Hydrawise).
-2. **Rain event** — any single day in that window ≥ `event_inches` (UF/IFAS sensor; `0` = off).
-3. **Forecast window** — sum from tomorrow through `forecast_days` vs `forecast_inches_max` (Rain Bird).
-4. **Rain delay** — after a past-window block, stay off `rain_delay_days` (`blocked_until` in `state.json`).
-5. **Near term** — hourly precip over the next `near_term_hours` vs `near_term_inches_max` (Rachio-style; `0` = off).
-6. **Freeze skip** — block when today or tomorrow forecast low is below `freeze_temp_f` (protect heads/pipes).
+1. **Seasonal balance** — prorated monthly Kentucky bluegrass target minus month-to-date rain, credited irrigation, and forecast must reach at least **`inches_per_cycle`** before the switch turns **ON**.
+2. **Safety** — block on freeze (today/tomorrow low below `freeze_temp_f`) or a heavy rain day in the lookback (`event_inches`).
 
-Watering is allowed only when **all** gates pass and no active rain delay remains. One [Visual Crossing Timeline API](https://www.visualcrossing.com/resources/documentation/weather-api/timeline-weather-api/) request returns daily rows (and hourly rows when near-term is enabled). Daily `precip` is summed in **inches** (`unitGroup=us`).
+```text
+watering_required = balance_ok AND safety_ok AND NOT sewer
+```
 
-**Check timing:** When `updates_per_day = 1`, the loop sleeps until the next `check_hour`:`check_minute` in `location.timezone` (default 4:30 AM — before most morning irrigation). With more than one check per day, checks are evenly spaced over 24 hours instead.
+There is **no weekly schedule** — each day recomputes one ON/OFF for the next cycle only. One [Visual Crossing Timeline API](https://www.visualcrossing.com/resources/documentation/weather-api/timeline-weather-api/) request returns daily rows; `precip` is summed in **inches** (`unitGroup=us`).
 
-- **Today** in the past window may blend observed rain with forecast rain for the rest of the day (`source: comb` in the API). That can block watering before a storm arrives — usually what you want for a rain bypass.
-- **API cost** is about one record per day returned plus one per hour when near-term is enabled (~`past_days + forecast_days + 24` per check). Set `log_level = "DEBUG"` to log `queryCost` each request.
+**Check timing:** The loop sleeps until the next `check_hour`:`check_minute` in `location.timezone` (default **4:30 AM**).
+
+- Forecast rain reduces today’s balance before it falls (conservative). Tune `[balance].forecast_days` if the switch stays OFF too often.
+- When the switch is **ON**, the model credits one `inches_per_cycle` to the month (it does not verify the panel actually ran).
+- Set `log_level = "DEBUG"` to log `queryCost` each request.
 - Match `location.timezone` to your coordinates; a mismatch with the API’s resolved timezone is logged as a warning.
+
+### Upgrading from v4
+
+Replace `settings.toml` from the new `settings.example.toml`. Removed keys include `inches_required`, `forecast_inches_max`, `near_term_*`, `rain_delay_days`, `updates_per_day`, and `past_days`. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Code
 
-Layered modules: `config`, `settings_io`, `windows`, `weather` (httpx), `logic`, `controller`, `gpio`, `cli`, and `install_cli`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs pre-commit, Pyright (strict), and pytest at 100% coverage on the latest Python 3.x.
+Layered modules: `config`, `balance`, `settings_io`, `windows`, `weather` (httpx), `logic`, `controller`, `gpio`, `cli`, and `install_cli`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs pre-commit, Pyright (strict), and pytest at 100% coverage on the latest Python 3.x.
 
 ## Development
 

@@ -108,7 +108,7 @@ def build_settings(
 def prompt_settings(_base: Settings, prompter: Prompter) -> Settings:
     typer.echo(
         "\n==> Defaults from settings.example.toml "
-        "(edit settings.toml later to customize watering, GPIO, etc.)\n"
+        "(seasonal balance ON, 4:30 AM check; edit settings.toml to customize)\n"
     )
     typer.echo("==> Visual Crossing API (free key: https://www.visualcrossing.com/weather-api)")
     api_key = prompter.secret("Visual Crossing API key")
@@ -185,7 +185,10 @@ def run_install(
 
     typer.echo("Sprinkler Rain Bypass — installer")
     typer.echo(f"Install directory: {install_root}")
-    typer.echo("Press Enter to accept defaults (ZIP 53029) everywhere except your API key.\n")
+    typer.echo(
+        "Press Enter for defaults (ZIP 53029, seasonal balance, 4:30 AM check) "
+        "except your API key.\n"
+    )
     if is_pi_zero():
         typer.secho(
             "Pi Zero detected — first pip install can take 10–20 minutes on a slow SD card.",
@@ -229,6 +232,10 @@ def run_install(
         )
 
     typer.echo("\n==> Done.")
+    typer.echo(
+        "  Balance: seasonal ON, 0.33 in/cycle — calibrate "
+        "[balance].inches_per_cycle after a catch-cup test."
+    )
     typer.echo(f"  Config:  {settings_path}")
     typer.echo(f"  Manual:  {python} -m rain_bypass --once")
     typer.echo(f"  Loop:    {python} -m rain_bypass")

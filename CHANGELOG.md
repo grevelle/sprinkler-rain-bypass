@@ -7,19 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2025-06-27
+
 ### Added
 
-- Pi Zero W tuning: safe GPIO boot state, systemd memory cap, installer/SD-card pip flags, README platform notes.
-- `install.sh` prerequisite checks on apt-based systems (python3-venv, git, Pi build packages) with optional auto-install.
-- `scripts/ci.sh` and `scripts/ci.ps1` to mirror GitHub Actions locally; pre-push hooks for Pyright and pytest; `.gitattributes` for LF shell scripts.
-- Removed Dependabot (no pinned versions to bump).
+- **Seasonal balance** — daily ON/OFF from prorated monthly Kentucky bluegrass targets, `rain_mtd`, forecast, and `[balance].inches_per_cycle`.
+- New module `rain_bypass.balance` and required `[balance]` settings section.
 
 ### Changed
 
-- Default `weather_timeout_seconds` increased to **45** for slow Pi Zero W Wi‑Fi.
-- Installer uses `settings.example.toml` defaults, resolves **ZIP code → location** via Visual Crossing, and only requires the **API key**; other confirms default to yes on Enter.
-- **No version pins** anywhere: unpinned Python deps, GitHub Actions on `@main`, pre-commit on `main`, CI uses latest Python 3.x with `pip install --upgrade`.
-- **DRY:** `deploy/rain-bypass.service.in` is the single systemd template; Pi detection lives in `rain_bypass.platform` (bash keeps a minimal pre-venv copy).
+- **Breaking:** replaced six-gate rain bypass with balance + safety (freeze, storm event). No backward compatibility with v4 `settings.toml`.
+- **Breaking:** removed `inches_required`, `forecast_inches_max`, `near_term_*`, `rain_delay_days`, `freeze_skip`, `updates_per_day`, `past_days`; `forecast_days` moved to `[balance]`.
+- `Watering` uses `event_lookback_days` (default 3) instead of `past_days`.
+- Weather fetch uses daily rows only; `WeatherSnapshot` exposes `rain_mtd`.
+- `State` / `Decision` track `balance_month` and `irrigation_inches_mtd`; removed `blocked_until`.
+- Minimal `settings.example.toml`; installer reminds users to calibrate `inches_per_cycle`.
 
 ## [4.0.0] - 2025-06-27
 
@@ -35,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `models`, `exceptions`, `windows`, `weather`, `logic`, `controller`, and `cli` modules.
 - `WeatherError` for Visual Crossing failures.
 - `.pre-commit-config.yaml` and Dependabot for pip and GitHub Actions.
+- Pi Zero W tuning, `scripts/ci.*`, pre-push hooks, unpinned deps policy, DRY systemd template.
 
 ## [3.2.0] - 2025-06
 
@@ -63,7 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Visual Crossing Timeline API replaces Open-Meteo.
 - Pydantic v2 config, 100% test coverage enforced in CI.
 
-[Unreleased]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v5.0.0...HEAD
+[5.0.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v4.0.0...v5.0.0
 [4.0.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v3.2.0...v4.0.0
 [3.2.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v3.0.0...v3.1.0

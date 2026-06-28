@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
 
-from rain_bypass import config
+from rain_bypass import balance, config
 from rain_bypass.config import FailMode, Settings, State, in_sewer_lockout
 from rain_bypass.exceptions import WeatherError
 from rain_bypass.models import Decision, WeatherSnapshot
@@ -12,51 +11,13 @@ from rain_bypass.weather import fetch_weather
 logger = logging.getLogger(__name__)
 
 
-def past_ok(snapshot: WeatherSnapshot, settings: Settings) -> bool:
-    w = settings.watering
-    if snapshot.past_inches > w.inches_required:
+def safety_allows_watering(snapshot: WeatherSnapshot, settings: Settings) -> bool:
+    if snapshot.freeze_block:
         return False
+    w = settings.watering
     if w.event_inches > 0 and snapshot.max_daily_inches >= w.event_inches:
         return False
     return True
-
-
-def allow_watering(snapshot: WeatherSnapshot, settings: Settings) -> bool:
-    w = settings.watering
-    if snapshot.freeze_block:
-        return False
-    if w.near_term_hours > 0 and snapshot.near_term_inches > w.near_term_inches_max:
-        return False
-    if snapshot.forecast_inches > w.forecast_inches_max:
-        return False
-    return past_ok(snapshot, settings)
-
-
-def update_blocked_until(
-    today: date,
-    *,
-    past_ok_flag: bool,
-    rain_delay_days: int,
-    blocked_until: date | None,
-) -> date | None:
-    if rain_delay_days <= 0:
-        return None
-    if not past_ok_flag:
-        candidate = today + timedelta(days=rain_delay_days)
-        return candidate if blocked_until is None else max(blocked_until, candidate)
-    if blocked_until and today > blocked_until:
-        return None
-    return blocked_until
-
-
-def watering_required(
-    today: date,
-    weather_allow: bool,
-    blocked_until: date | None,
-) -> bool:
-    if blocked_until and today <= blocked_until:
-        return False
-    return weather_allow
 
 
 def decide(settings: Settings, state: State) -> Decision:
@@ -71,9 +32,17 @@ def decide(settings: Settings, state: State) -> Decision:
             sewer.end_month,
             sewer.end_day,
         )
-        return Decision(False, None, None, state.blocked_until, None)
-
-    blocked_until = state.blocked_until
+        return Decision(
+            False,
+            None,
+            None,
+            None,
+            None,
+            None,
+            state.balance_month,
+            state.irrigation_inches_mtd,
+            None,
+        )
 
     try:
         snapshot = fetch_weather(settings)
@@ -88,29 +57,62 @@ def decide(settings: Settings, state: State) -> Decision:
             watering,
             state.rainfall_inches,
             state.forecast_inches,
-            blocked_until,
+            None,
+            None,
+            None,
+            state.balance_month,
+            state.irrigation_inches_mtd,
             str(exc),
         )
 
-    weather_allow = allow_watering(snapshot, settings)
-    blocked_until = update_blocked_until(
+    state = balance.ensure_balance_month(state, today)
+    target = balance.target_to_date(today, settings)
+    deficit = balance.compute_deficit(
         today,
-        past_ok_flag=past_ok(snapshot, settings),
-        rain_delay_days=settings.watering.rain_delay_days,
-        blocked_until=blocked_until,
+        settings,
+        snapshot.rain_mtd,
+        state.irrigation_inches_mtd,
+        snapshot.forecast_inches,
     )
-    required = watering_required(today, weather_allow, blocked_until)
+    balance_ok = balance.balance_allows_watering(
+        today,
+        settings,
+        snapshot.rain_mtd,
+        state.irrigation_inches_mtd,
+        snapshot.forecast_inches,
+    )
+    safety_ok = safety_allows_watering(snapshot, settings)
+    required = balance_ok and safety_ok
+
     if snapshot.freeze_block:
         logger.info(
             "freeze skip active (tempmin below %.1f F today or tomorrow)",
             settings.watering.freeze_temp_f,
         )
-    if blocked_until and today <= blocked_until and weather_allow:
-        logger.info("rain delay active through %s; watering blocked", blocked_until)
+
+    logger.info(
+        "balance: target_to_date=%.2f rain_mtd=%.2f irr_mtd=%.2f forecast=%.2f "
+        "deficit=%.2f watering_required=%s",
+        target,
+        snapshot.rain_mtd,
+        state.irrigation_inches_mtd,
+        snapshot.forecast_inches,
+        deficit,
+        required,
+    )
+
+    updated_state = balance.refresh_balance_state(
+        state, today, switch_on=required, settings=settings
+    )
+
     return Decision(
         required,
-        snapshot.past_inches,
+        snapshot.rain_mtd,
         snapshot.forecast_inches,
-        blocked_until,
+        balance_ok,
+        deficit,
+        target,
+        updated_state.balance_month,
+        updated_state.irrigation_inches_mtd,
         None,
     )

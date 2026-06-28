@@ -1,13 +1,30 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import tomllib
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+DEFAULT_MONTHLY_TARGETS: dict[int, float] = {
+    1: 0.0,
+    2: 0.0,
+    3: 0.0,
+    4: 3.0,
+    5: 5.0,
+    6: 6.5,
+    7: 5.0,
+    8: 5.0,
+    9: 4.0,
+    10: 2.0,
+    11: 1.0,
+    12: 0.0,
+}
 
 
 class ConfigError(ValueError):
@@ -38,24 +55,47 @@ class Location(FrozenModel):
         return text[:5]
 
 
-class Watering(FrozenModel):
-    inches_required: float
-    past_days: int = Field(ge=1)
+class BalanceMonth(FrozenModel):
+    target_inches_per_month: float = Field(ge=0)
+
+
+def default_monthly_table() -> dict[int, BalanceMonth]:
+    return {
+        month: BalanceMonth(target_inches_per_month=inches)
+        for month, inches in DEFAULT_MONTHLY_TARGETS.items()
+    }
+
+
+class Balance(FrozenModel):
+    inches_per_cycle: float = Field(gt=0)
     forecast_days: int = Field(default=2, ge=0)
-    forecast_inches_max: float = Field(default=0.5, ge=0)
-    event_inches: float = Field(default=0.25, ge=0)
-    rain_delay_days: int = Field(default=2, ge=0)
-    near_term_hours: int = Field(default=24, ge=0)
-    near_term_inches_max: float = Field(default=0.25, ge=0)
-    freeze_skip: bool = Field(default=True)
-    freeze_temp_f: float = Field(default=32)
+    monthly: dict[int, BalanceMonth] = Field(default_factory=default_monthly_table)
+
+    @field_validator("monthly", mode="before")
+    @classmethod
+    def merge_monthly_overrides(cls, value: object) -> dict[int, BalanceMonth]:
+        base = default_monthly_table()
+        if not isinstance(value, dict):
+            return base
+        overrides = cast(dict[str | int, object], value)
+        if not overrides:
+            return base
+        merged = dict(base)
+        for key, item in overrides.items():
+            month = int(key)
+            if isinstance(item, BalanceMonth):
+                merged[month] = item
+            else:
+                merged[month] = BalanceMonth.model_validate(item)
+        return merged
+
+
+class Watering(FrozenModel):
     check_hour: int = Field(default=4, ge=0, le=23)
     check_minute: int = Field(default=30, ge=0, le=59)
-    updates_per_day: int = Field(ge=1)
-
-    @property
-    def interval_seconds(self) -> float:
-        return 86400 / self.updates_per_day
+    event_lookback_days: int = Field(default=3, ge=1)
+    event_inches: float = Field(default=0.25, ge=0)
+    freeze_temp_f: float = Field(default=32)
 
 
 class SewerLockout(FrozenModel):
@@ -92,6 +132,7 @@ class Runtime(FrozenModel):
 
 class Settings(FrozenModel):
     location: Location
+    balance: Balance
     watering: Watering
     sewer: SewerLockout = Field(default_factory=SewerLockout)
     weather: Weather
@@ -104,14 +145,20 @@ class State(FrozenModel):
     watering_required: bool | None = None
     rainfall_inches: float | None = None
     forecast_inches: float | None = None
-    blocked_until: date | None = None
+    balance_month: int | None = None
+    irrigation_inches_mtd: float = 0.0
     last_error: str | None = None
 
     @classmethod
     def load(cls, path: Path) -> State:
         if not path.is_file():
             return cls()
-        return cls.model_validate_json(path.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            data = cast(dict[str, Any], raw)
+            data.pop("blocked_until", None)
+            return cls.model_validate(data)
+        return cls.model_validate(raw)
 
     def save(self, path: Path) -> None:
         path.write_text(self.model_dump_json(indent=2) + "\n", encoding="utf-8")

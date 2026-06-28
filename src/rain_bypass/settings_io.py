@@ -41,6 +41,9 @@ def load_example_settings(**sections: Mapping[str, Any]) -> Settings:
 def settings_to_toml_dict(settings: Settings) -> dict[str, Any]:
     data = settings.model_dump()
     data["runtime"]["state_path"] = str(settings.runtime.state_path)
+    balance = dict(data["balance"])
+    balance.pop("monthly", None)
+    data["balance"] = balance
     return data
 
 

@@ -1,4 +1,4 @@
-"""Sprinkler rain bypass — rain-aware GPIO controller for irrigation systems."""
+"""Sprinkler rain bypass — seasonal balance GPIO controller for irrigation systems."""
 
 from importlib.metadata import PackageNotFoundError, version
 
@@ -6,7 +6,7 @@ from rain_bypass.cli import app
 from rain_bypass.config import ConfigError, FailMode, Settings, State, load_settings
 from rain_bypass.controller import run
 from rain_bypass.exceptions import WeatherError
-from rain_bypass.logic import allow_watering, decide, past_ok, watering_required
+from rain_bypass.logic import decide, safety_allows_watering
 from rain_bypass.models import Decision, WeatherSnapshot
 from rain_bypass.weather import fetch_weather, weather_api_smoke
 
@@ -24,13 +24,11 @@ __all__ = [
     "WeatherError",
     "WeatherSnapshot",
     "__version__",
-    "allow_watering",
     "app",
     "decide",
     "fetch_weather",
     "load_settings",
-    "past_ok",
     "run",
-    "watering_required",
+    "safety_allows_watering",
     "weather_api_smoke",
 ]

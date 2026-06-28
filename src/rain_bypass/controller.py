@@ -14,13 +14,24 @@ logger = logging.getLogger(__name__)
 def tick(settings: Settings, state: State, apply: Callable[[bool], None]) -> State:
     decision = decide(settings, state)
     apply(decision.watering_required)
-    updated = State(
-        last_weather_update=time.time(),
-        watering_required=decision.watering_required,
-        rainfall_inches=decision.past_inches,
-        forecast_inches=decision.forecast_inches,
-        blocked_until=decision.blocked_until,
-        last_error=decision.error,
+    updated = state.model_copy(
+        update={
+            "last_weather_update": time.time(),
+            "watering_required": decision.watering_required,
+            "rainfall_inches": decision.rain_mtd,
+            "forecast_inches": decision.forecast_inches,
+            "balance_month": (
+                decision.balance_month
+                if decision.balance_month is not None
+                else state.balance_month
+            ),
+            "irrigation_inches_mtd": (
+                decision.irrigation_inches_mtd
+                if decision.irrigation_inches_mtd is not None
+                else state.irrigation_inches_mtd
+            ),
+            "last_error": decision.error,
+        }
     )
     updated.save(settings.runtime.state_path)
     return updated

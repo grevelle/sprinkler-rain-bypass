@@ -8,7 +8,6 @@ from rain_bypass.config import Gpio, load_settings
 from rain_bypass.settings_io import load_example_settings, write_settings
 
 TEST_SETTINGS_OVERRIDES = {
-    "watering": {"near_term_hours": 0, "updates_per_day": 2},
     "weather": {"api_key": "test-key"},
     "gpio": {"mock": True},
     "runtime": {"weather_timeout_seconds": 15},
