@@ -6,7 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 
 class ConfigError(ValueError):
@@ -20,11 +20,6 @@ class FrozenModel(BaseModel):
 class FailMode(StrEnum):
     DISABLE_WATERING = "disable_watering"
     KEEP_LAST_STATE = "keep_last_state"
-
-
-class Provider(StrEnum):
-    OPEN_METEO = "open_meteo"
-    VISUAL_CROSSING = "visual_crossing"
 
 
 class Location(FrozenModel):
@@ -50,18 +45,6 @@ class Season(FrozenModel):
     end_day: int = Field(ge=1, le=31)
 
 
-class Weather(FrozenModel):
-    provider: Provider = Provider.OPEN_METEO
-    visual_crossing_api_key: str | None = None
-    request_timeout_seconds: int = Field(default=30, ge=1)
-
-    @model_validator(mode="after")
-    def require_api_key_for_visual_crossing(self) -> Weather:
-        if self.provider is Provider.VISUAL_CROSSING and not self.visual_crossing_api_key:
-            raise ValueError("visual_crossing_api_key is required when provider is visual_crossing")
-        return self
-
-
 class Gpio(FrozenModel):
     relay: int
     watering_enabled_led: int
@@ -73,6 +56,7 @@ class Runtime(FrozenModel):
     state_path: Path = Path("state.json")
     fail_mode: FailMode = FailMode.DISABLE_WATERING
     log_level: str = "INFO"
+    weather_timeout_seconds: int = Field(default=30, ge=1)
 
     @field_validator("log_level")
     @classmethod
@@ -84,7 +68,6 @@ class Settings(FrozenModel):
     location: Location
     watering: Watering
     season: Season
-    weather: Weather
     gpio: Gpio
     runtime: Runtime
 
@@ -109,7 +92,6 @@ class Decision(FrozenModel):
     watering_required: bool
     rainfall_inches: float | None
     in_season: bool
-    source: str
     error: str | None = None
 
 

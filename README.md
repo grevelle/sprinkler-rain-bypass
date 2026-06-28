@@ -1,54 +1,40 @@
 # Sprinkler Rain Bypass
 
-Raspberry Pi rain-bypass controller: check recent precipitation, drive a relay, show status on red/green LEDs.
+Raspberry Pi controller that checks recent rainfall (Open-Meteo) and drives a relay plus status LEDs for your irrigation rain-bypass input.
 
-## Install
+## Setup
 
 ```bash
 git clone https://github.com/grevelle/sprinkler-rain-bypass.git
 cd sprinkler-rain-bypass
-pip install -e ".[gpio]"   # omit [gpio] on dev machines
-cp settings.example.toml settings.toml
+pip install -e ".[gpio]"
+cp settings.example.toml settings.toml   # edit coordinates, pins, thresholds
 ```
-
-Edit `settings.toml` with your coordinates, thresholds, and GPIO pins.
 
 ## Run
 
 ```bash
-python -m rain_bypass --once   # test one cycle
-python -m rain_bypass          # continuous loop
+python -m rain_bypass --once   # single check
+python -m rain_bypass          # loop
 ```
 
-Set `gpio.mock = true` to develop without a Pi.
+Use `gpio.mock = true` in settings to develop off the Pi.
 
-## Config
+## Config (`settings.toml`)
 
-| Section | Purpose |
-|---------|---------|
-| `location` | Fixed lat/lon and timezone |
-| `watering` | Rain threshold, lookback days, checks per day |
-| `season` | Date range when watering may run |
-| `weather` | `open_meteo` (default) or `visual_crossing` |
-| `gpio` | BCM pins and mock mode |
-| `runtime` | State file, fail mode, log level |
+| Section | Keys |
+|---------|------|
+| `location` | `latitude`, `longitude`, `timezone` |
+| `watering` | `inches_required`, `past_days`, `updates_per_day` |
+| `season` | `start_month/day`, `end_month/day` |
+| `gpio` | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock` |
+| `runtime` | `state_path`, `fail_mode`, `log_level`, `weather_timeout_seconds` |
 
-On weather API failure, `fail_mode = "disable_watering"` blocks watering; `"keep_last_state"` reuses the prior decision.
+`fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
 
-## Layout
+## Hardware
 
-```
-src/rain_bypass/
-  config.py    settings + state (Pydantic)
-  weather.py   precipitation providers
-  gpio.py      relay + LED control
-  app.py       decision loop
-  __main__.py  CLI
-  py.typed
-.github/workflows/ci.yml
-docs/hardware.md
-deploy/rain-bypass.service
-```
+[docs/hardware.md](docs/hardware.md)
 
 ## systemd
 
@@ -56,20 +42,6 @@ deploy/rain-bypass.service
 sudo cp deploy/rain-bypass.service /etc/systemd/system/
 sudo systemctl enable --now rain-bypass
 ```
-
-Adjust `WorkingDirectory` and `ExecStart` paths in the unit file for your install location.
-
-## Migrate from v1
-
-```bash
-python scripts/migrate_ini.py
-```
-
-Then set coordinates manually and switch to `open_meteo` if desired.
-
-## Hardware
-
-See [docs/hardware.md](docs/hardware.md).
 
 ## License
 

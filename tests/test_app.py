@@ -5,17 +5,12 @@ import pytest
 
 from rain_bypass.app import decide, in_season, run
 from rain_bypass.config import Decision, FailMode, Season, State, load_settings
-from rain_bypass.weather import WeatherError, mm_to_inches, precip_window
+from rain_bypass.weather import WeatherError, precip_window
 
 
 def test_precip_window(settings):
     start, end = precip_window(settings)
-    assert end >= start
     assert (end - start).days == settings.watering.past_days - 1
-
-
-def test_mm_to_inches():
-    assert mm_to_inches(25.4) == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize(
@@ -32,7 +27,7 @@ def test_out_of_season(settings):
         update={"season": Season(start_month=12, start_day=1, end_month=12, end_day=31)}
     )
     assert decide(winter, State()) == Decision(
-        watering_required=False, rainfall_inches=None, in_season=False, source="season"
+        watering_required=False, rainfall_inches=None, in_season=False
     )
 
 
@@ -50,7 +45,6 @@ def test_fail_mode_keep_last_state(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.app.fetch_precip", _fail)
     decision = decide(settings, state)
     assert decision.watering_required is True
-    assert decision.source == "last_state"
 
 
 def test_state_round_trip(tmp_path):

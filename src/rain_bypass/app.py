@@ -18,12 +18,9 @@ def in_season(season: Season, today: date) -> bool:
 
 
 def decide(settings: Settings, state: State) -> Decision:
-    today = local_today(settings.location)
-    if not in_season(settings.season, today):
-        logger.info("outside watering season (%s)", today)
-        return Decision(
-            watering_required=False, rainfall_inches=None, in_season=False, source="season"
-        )
+    if not in_season(settings.season, local_today(settings.location)):
+        logger.info("outside watering season")
+        return Decision(watering_required=False, rainfall_inches=None, in_season=False)
 
     try:
         rainfall = fetch_precip(settings)
@@ -38,12 +35,7 @@ def decide(settings: Settings, state: State) -> Decision:
         settings.watering.inches_required,
         "required" if required else "blocked",
     )
-    return Decision(
-        watering_required=required,
-        rainfall_inches=rainfall,
-        in_season=True,
-        source=settings.weather.provider.value,
-    )
+    return Decision(watering_required=required, rainfall_inches=rainfall, in_season=True)
 
 
 def _fallback(settings: Settings, state: State, message: str) -> Decision:
@@ -53,14 +45,12 @@ def _fallback(settings: Settings, state: State, message: str) -> Decision:
             watering_required=state.watering_required,
             rainfall_inches=state.rainfall_inches,
             in_season=True,
-            source="last_state",
             error=message,
         )
     return Decision(
         watering_required=False,
         rainfall_inches=state.rainfall_inches,
         in_season=True,
-        source="fail_safe",
         error=message,
     )
 

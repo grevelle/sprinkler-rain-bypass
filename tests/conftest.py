@@ -21,10 +21,6 @@ start_day = 19
 end_month = 9
 end_day = 12
 
-[weather]
-provider = "open_meteo"
-request_timeout_seconds = 15
-
 [gpio]
 relay = 25
 watering_enabled_led = 4
@@ -35,6 +31,7 @@ mock = true
 state_path = "state.json"
 fail_mode = "disable_watering"
 log_level = "INFO"
+weather_timeout_seconds = 15
 """
 
 
