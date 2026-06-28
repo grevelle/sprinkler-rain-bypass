@@ -14,7 +14,7 @@ class ConfigError(ValueError):
 
 
 class FrozenModel(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 class FailMode(StrEnum):

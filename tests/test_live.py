@@ -7,24 +7,16 @@ from datetime import timedelta
 from pathlib import Path
 from typing import NamedTuple
 
+import httpx
 import pytest
-import requests
+from typer.testing import CliRunner
 
-from rain_bypass.app import (
-    _sum_precip,
-    allow_watering,
-    decide,
-    fetch_weather,
-    forecast_window,
-    main,
-    past_window,
-    timeline_request_params,
-    timeline_url_for,
-    timeline_window,
-    watering_required,
-)
+from rain_bypass.cli import app
 from rain_bypass.config import Settings, State, local_today
+from rain_bypass.logic import allow_watering, decide, watering_required
 from rain_bypass.settings_io import load_example_settings, write_settings
+from rain_bypass.weather import fetch_weather, sum_precip, timeline_request_params, timeline_url_for
+from rain_bypass.windows import forecast_window, past_window, timeline_window
 
 pytestmark = [
     pytest.mark.live,
@@ -58,7 +50,7 @@ class LiveCase(NamedTuple):
 
 
 @pytest.fixture(params=LIVE_SITES, ids=[site[0] for site in LIVE_SITES])
-def live_case(tmp_path: Path, request) -> LiveCase:
+def live_case(tmp_path: Path, request: pytest.FixtureRequest) -> LiveCase:
     name, lat, lon, tz = request.param
     state_path = tmp_path / f"{name}-state.json"
     config_path = tmp_path / f"{name}-settings.toml"
@@ -73,7 +65,7 @@ def live_case(tmp_path: Path, request) -> LiveCase:
     return LiveCase(config_path=config_path, settings=settings)
 
 
-def _assert_days_contract(days: list) -> None:
+def _assert_days_contract(days: list[object]) -> None:
     assert isinstance(days, list)
     assert days, "expected at least one day from Visual Crossing"
     for day in days:
@@ -86,10 +78,10 @@ def _assert_days_contract(days: list) -> None:
             assert precip >= 0.0
 
 
-def test_live_timeline_api_contract(live_case: LiveCase):
+def test_live_timeline_api_contract(live_case: LiveCase) -> None:
     settings = live_case.settings
     api_start, api_end = timeline_window(settings)
-    response = requests.get(
+    response = httpx.get(
         timeline_url_for(settings, api_start, api_end),
         params=timeline_request_params(settings),
         timeout=30,
@@ -97,6 +89,7 @@ def test_live_timeline_api_contract(live_case: LiveCase):
     response.raise_for_status()
     payload = response.json()
     days = payload.get("days")
+    assert isinstance(days, list)
     _assert_days_contract(days)
     day_dates = {str(day["datetime"])[:10] for day in days}
     expected = {
@@ -106,20 +99,20 @@ def test_live_timeline_api_contract(live_case: LiveCase):
     assert day_dates == expected
 
 
-def test_live_fetch_weather_returns_inches(live_case: LiveCase):
+def test_live_fetch_weather_returns_inches(live_case: LiveCase) -> None:
     settings = live_case.settings
     api_start, api_end = timeline_window(settings)
     past_start, past_end = past_window(settings)
     forecast = forecast_window(settings)
     assert forecast is not None
     forecast_start, forecast_end = forecast
-    response = requests.get(
+    response = httpx.get(
         timeline_url_for(settings, api_start, api_end),
         params=timeline_request_params(settings),
         timeout=30,
     ).json()
-    expected_past = _sum_precip(response["days"], past_start, past_end)
-    expected_forecast = _sum_precip(response["days"], forecast_start, forecast_end)
+    expected_past = sum_precip(response["days"], past_start, past_end)
+    expected_forecast = sum_precip(response["days"], forecast_start, forecast_end)
     snapshot = fetch_weather(settings)
     assert snapshot.past_inches == pytest.approx(expected_past)
     assert snapshot.forecast_inches == pytest.approx(expected_forecast)
@@ -131,7 +124,7 @@ def test_live_fetch_weather_returns_inches(live_case: LiveCase):
     assert isinstance(snapshot.freeze_block, bool)
 
 
-def test_live_decide_matches_threshold(live_case: LiveCase):
+def test_live_decide_matches_threshold(live_case: LiveCase) -> None:
     settings = live_case.settings
     snapshot = fetch_weather(settings)
     decision = decide(settings, State())
@@ -145,9 +138,10 @@ def test_live_decide_matches_threshold(live_case: LiveCase):
     )
 
 
-def test_live_main_once_persists_state(live_case: LiveCase):
+def test_live_main_once_persists_state(live_case: LiveCase) -> None:
     settings = live_case.settings
-    assert main(["--config", str(live_case.config_path), "--once"]) == 0
+    result = CliRunner().invoke(app, ["--config", str(live_case.config_path), "--once"])
+    assert result.exit_code == 0
     saved = State.load(settings.runtime.state_path)
     assert saved.last_weather_update is not None
     assert saved.rainfall_inches is not None

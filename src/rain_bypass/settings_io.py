@@ -3,7 +3,7 @@ from __future__ import annotations
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import tomli_w
 
@@ -15,8 +15,12 @@ EXAMPLE_SETTINGS_PATH = _REPO_ROOT / "settings.example.toml"
 
 def _deep_merge(base: dict[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
     for key, value in patch.items():
-        if isinstance(value, Mapping) and isinstance(base.get(key), dict):
-            _deep_merge(base[key], value)
+        existing = base.get(key)
+        if isinstance(value, Mapping) and isinstance(existing, dict):
+            _deep_merge(
+                cast(dict[str, Any], existing),
+                cast(Mapping[str, Any], value),
+            )
         else:
             base[key] = value
     return base

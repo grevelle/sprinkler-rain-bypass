@@ -20,6 +20,6 @@ if [[ ! -d "${ROOT}/.venv" ]]; then
 fi
 
 "${ROOT}/.venv/bin/python" -m pip install -q --upgrade pip
-"${ROOT}/.venv/bin/python" -m pip install -q -e ".[gpio,install]"
+"${ROOT}/.venv/bin/python" -m pip install -q -e ".[gpio]"
 
 exec "${ROOT}/.venv/bin/python" -m rain_bypass.install_cli "$@"

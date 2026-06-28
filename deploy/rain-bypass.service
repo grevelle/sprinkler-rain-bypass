@@ -1,4 +1,4 @@
-# Template — paths are filled by install.sh. Manual install: edit ExecStart and WorkingDirectory.
+# Template — paths are filled by rain-bypass-install. Manual install: edit ExecStart and WorkingDirectory.
 [Unit]
 Description=Sprinkler rain bypass controller
 After=network-online.target

@@ -10,10 +10,12 @@ from typing import Protocol
 
 import typer
 
-from rain_bypass.app import main as run_controller
-from rain_bypass.app import weather_api_smoke
 from rain_bypass.config import FailMode, Settings, load_settings
+from rain_bypass.controller import run
 from rain_bypass.settings_io import load_example_settings, write_settings
+from rain_bypass.weather import weather_api_smoke
+
+RunCommand = Callable[..., subprocess.CompletedProcess[bytes]]
 
 SERVICE_NAME = "rain-bypass"
 app = typer.Typer(
@@ -230,9 +232,9 @@ def install_systemd_unit(
     settings: Path,
     *,
     prompter: Prompter,
-    run_command: Callable[..., subprocess.CompletedProcess] | None = None,
+    run_command: RunCommand | None = None,
 ) -> None:
-    runner = run_command or subprocess.run
+    runner: RunCommand = run_command or subprocess.run
     if shutil.which("systemctl") is None:
         typer.secho("warning: systemctl not found; skipping service install.", fg=typer.colors.YELLOW)
         return
@@ -266,7 +268,7 @@ def run_install(
     skip_systemd: bool = False,
     skip_once: bool = False,
     skip_api_test: bool = False,
-    run_command: Callable[..., subprocess.CompletedProcess] | None = None,
+    run_command: RunCommand | None = None,
 ) -> None:
     install_root = root or repo_root()
     settings_path = install_root / "settings.toml"
@@ -302,8 +304,11 @@ def run_install(
 
     if not skip_once and prompts.confirm("Run a live --once cycle now?", default=True):
         typer.echo("==> Running one control cycle (--once)")
-        if run_controller(["--config", str(settings_path), "--once"]) != 0:
-            raise typer.Exit(1)
+        try:
+            run(load_settings(settings_path), once=True)
+        except Exception as exc:
+            typer.secho(f"Control cycle failed: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1) from exc
 
     if not skip_systemd:
         install_systemd_unit(install_root, python, settings_path, prompter=prompts, run_command=run_command)

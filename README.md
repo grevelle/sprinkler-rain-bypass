@@ -18,7 +18,7 @@ chmod +x install.sh
 Manual setup (or development off the Pi):
 
 ```bash
-pip install -e ".[dev]"    # use [gpio] on the Pi
+pip install -e ".[dev,gpio]"    # use [gpio] on the Pi
 cp settings.example.toml settings.toml   # edit coordinates, pins, API key
 ```
 
@@ -80,7 +80,7 @@ Watering is allowed only when **all** gates pass and no active rain delay remain
 
 ## Code
 
-`config`, `settings_io`, `app`, `gpio`, and `install_cli`. `settings.example.toml` is the single source for defaults. CI runs Ruff, Pyright, ShellCheck, and pytest at 100% coverage.
+Layered modules: `config`, `settings_io`, `windows`, `weather` (httpx), `logic`, `controller`, `gpio`, `cli`, and `install_cli`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs Ruff, Pyright (strict), ShellCheck, and pytest at 100% coverage on Python 3.11 and 3.12.
 
 ## Hardware
 

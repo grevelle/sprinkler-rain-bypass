@@ -226,7 +226,7 @@ def test_run_install_skip_api_test(tmp_path, monkeypatch):
 def test_run_install_runs_once_successfully(tmp_path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
-    monkeypatch.setattr("rain_bypass.install_cli.run_controller", lambda _args: 0)
+    monkeypatch.setattr("rain_bypass.install_cli.run", lambda *_args, **_kwargs: None)
     prompter = FakePrompter(secrets=["live-key"], confirms=[True, True, False])
     run_install(tmp_path, prompter=prompter, skip_systemd=True)
 
@@ -314,7 +314,10 @@ def test_run_install_api_failure(tmp_path, monkeypatch):
 def test_run_install_once_failure(tmp_path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
-    monkeypatch.setattr("rain_bypass.install_cli.run_controller", lambda _args: 1)
+    def _fail(*_args, **_kwargs):
+        raise RuntimeError("cycle failed")
+
+    monkeypatch.setattr("rain_bypass.install_cli.run", _fail)
     prompter = FakePrompter(secrets=["key"], confirms=[True, True, False])
     with pytest.raises(typer.Exit) as exc:
         run_install(tmp_path, prompter=prompter, skip_systemd=True)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from typing import Protocol
 
@@ -46,13 +46,15 @@ class PiPins:
 
 
 @contextmanager
-def watering_pins(gpio: Gpio) -> Iterator[PinDriver]:
+def watering_pins(gpio: Gpio) -> Generator[PinDriver, None, None]:
     if gpio.mock:
         driver: PinDriver = MockPins()
         cleanup = None
     else:
         try:
-            import RPi  # noqa: F401
+            import importlib
+
+            importlib.import_module("RPi.GPIO")
         except ImportError as exc:
             raise RuntimeError("install [gpio] extra or set gpio.mock = true") from exc
         driver = PiPins(gpio)

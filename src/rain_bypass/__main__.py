@@ -1,6 +1,4 @@
-import sys
-
-from rain_bypass.app import main
+from rain_bypass.cli import app
 
 if __name__ == "__main__":  # pragma: no cover
-    sys.exit(main())
+    app()
