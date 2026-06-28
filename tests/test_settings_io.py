@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from pydantic import ValidationError
 
 from rain_bypass.config import Location, load_settings
