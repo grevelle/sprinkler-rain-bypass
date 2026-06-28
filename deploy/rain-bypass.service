@@ -1,0 +1,16 @@
+[Unit]
+Description=Sprinkler rain bypass controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/sprinkler-rain-bypass
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m rain_bypass --config /opt/sprinkler-rain-bypass/settings.toml
+Restart=on-failure
+RestartSec=300
+
+[Install]
+WantedBy=multi-user.target

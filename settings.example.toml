@@ -1,0 +1,46 @@
+# Copy to settings.toml and edit before running:
+#   cp settings.example.toml settings.toml
+
+[location]
+# Fixed coordinates for your sprinkler controller (required).
+latitude = 40.7128
+longitude = -74.0060
+# IANA timezone for season dates and precipitation windows (optional).
+timezone = "America/New_York"
+
+[watering]
+# Allow watering when total precipitation over the window is at or below this value.
+inches_required = 0.6
+# Number of calendar days to sum, ending today (inclusive) in [location].timezone.
+past_days = 7
+# How many weather checks to run per day (controls sleep interval).
+updates_per_day = 1
+
+[season]
+# Watering is only considered during this inclusive date range each year.
+start_month = 3
+start_day = 19
+end_month = 9
+end_day = 12
+
+[weather]
+# Supported providers: "open_meteo" (free, no key) or "visual_crossing".
+provider = "open_meteo"
+# Required only when provider = "visual_crossing".
+# visual_crossing_api_key = "your-key-here"
+request_timeout_seconds = 30
+
+[gpio]
+relay = 25
+watering_enabled_led = 4
+watering_disabled_led = 27
+# Set true to run on a PC without a Raspberry Pi (logs pin changes only).
+mock = false
+
+[runtime]
+# Where to persist last check results between runs.
+state_path = "state.json"
+# On weather/API errors: "disable_watering" (conservative) or "keep_last_state".
+fail_mode = "disable_watering"
+# Optional log level: DEBUG, INFO, WARNING, ERROR
+log_level = "INFO"
