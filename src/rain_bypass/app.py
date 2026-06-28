@@ -1,46 +1,14 @@
 from __future__ import annotations
 
-import json
 import logging
 import time
-from dataclasses import asdict, dataclass
-from datetime import date, datetime
-from pathlib import Path
-from zoneinfo import ZoneInfo
+from datetime import date
 
-from rain_bypass.config import FailMode, Season, Settings
-from rain_bypass.gpio import watering_pins
+from rain_bypass.config import Decision, FailMode, Season, Settings, State, local_today
+from rain_bypass.gpio import PinFactory, watering_pins
 from rain_bypass.weather import WeatherError, fetch_precip
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class State:
-    last_weather_update: float | None = None
-    watering_required: bool | None = None
-    rainfall_inches: float | None = None
-    last_error: str | None = None
-
-
-@dataclass(frozen=True)
-class Decision:
-    watering_required: bool
-    rainfall_inches: float | None
-    in_season: bool
-    source: str
-    error: str | None = None
-
-
-def load_state(path: Path) -> State:
-    if not path.is_file():
-        return State()
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return State(**{field: data.get(field) for field in State.__dataclass_fields__})
-
-
-def save_state(path: Path, state: State) -> None:
-    path.write_text(json.dumps(asdict(state), indent=2) + "\n", encoding="utf-8")
 
 
 def in_season(season: Season, today: date) -> bool:
@@ -50,10 +18,12 @@ def in_season(season: Season, today: date) -> bool:
 
 
 def decide(settings: Settings, state: State) -> Decision:
-    today = datetime.now(ZoneInfo(settings.location.timezone)).date()
+    today = local_today(settings.location)
     if not in_season(settings.season, today):
         logger.info("outside watering season (%s)", today)
-        return Decision(False, None, False, "season")
+        return Decision(
+            watering_required=False, rainfall_inches=None, in_season=False, source="season"
+        )
 
     try:
         rainfall = fetch_precip(settings)
@@ -68,25 +38,48 @@ def decide(settings: Settings, state: State) -> Decision:
         settings.watering.inches_required,
         "required" if required else "blocked",
     )
-    return Decision(required, rainfall, True, settings.weather.provider.value)
+    return Decision(
+        watering_required=required,
+        rainfall_inches=rainfall,
+        in_season=True,
+        source=settings.weather.provider.value,
+    )
 
 
 def _fallback(settings: Settings, state: State, message: str) -> Decision:
-    if settings.runtime.fail_mode is FailMode.KEEP_LAST_STATE and state.watering_required is not None:
-        return Decision(state.watering_required, state.rainfall_inches, True, "last_state", message)
-    return Decision(False, state.rainfall_inches, True, "fail_safe", message)
+    keep_last = settings.runtime.fail_mode is FailMode.KEEP_LAST_STATE
+    if keep_last and state.watering_required is not None:
+        return Decision(
+            watering_required=state.watering_required,
+            rainfall_inches=state.rainfall_inches,
+            in_season=True,
+            source="last_state",
+            error=message,
+        )
+    return Decision(
+        watering_required=False,
+        rainfall_inches=state.rainfall_inches,
+        in_season=True,
+        source="fail_safe",
+        error=message,
+    )
 
 
 def _tick(settings: Settings, state: State, apply) -> State:
     decision = decide(settings, state)
     apply(decision.watering_required)
-    state = State(time.time(), decision.watering_required, decision.rainfall_inches, decision.error)
-    save_state(settings.runtime.state_path, state)
+    state = State(
+        last_weather_update=time.time(),
+        watering_required=decision.watering_required,
+        rainfall_inches=decision.rainfall_inches,
+        last_error=decision.error,
+    )
+    state.save(settings.runtime.state_path)
     return state
 
 
-def run(settings: Settings, *, once: bool = False, pin_factory=watering_pins) -> None:
-    state = load_state(settings.runtime.state_path)
+def run(settings: Settings, *, once: bool = False, pin_factory: PinFactory = watering_pins) -> None:
+    state = State.load(settings.runtime.state_path)
     with pin_factory(settings.gpio) as driver:
         if once:
             _tick(settings, state, driver.apply)

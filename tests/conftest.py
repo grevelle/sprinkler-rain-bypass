@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from rain_bypass.config import ConfigError, FailMode, Provider, load_settings
+from rain_bypass.config import load_settings
 
 SETTINGS = """
 [location]

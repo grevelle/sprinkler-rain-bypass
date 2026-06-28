@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sprinkler-rain-bypass"
-version = "2.1.0"
+version = "2.2.0"
 description = "Raspberry Pi rain bypass controller for irrigation systems"
 readme = "README.md"
 license = { text = "MIT" }
@@ -28,6 +28,9 @@ Repository = "https://github.com/grevelle/sprinkler-rain-bypass"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+rain_bypass = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

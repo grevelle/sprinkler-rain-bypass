@@ -8,7 +8,10 @@ from rain_bypass.weather import OPEN_METEO_ARCHIVE, OPEN_METEO_FORECAST, OpenMet
 
 @responses.activate
 def test_open_meteo(settings, monkeypatch):
-    monkeypatch.setattr("rain_bypass.weather.precip_window", lambda _s: (date(2024, 6, 8), date(2024, 6, 10)))
+    monkeypatch.setattr(
+        "rain_bypass.weather.precip_window",
+        lambda _s: (date(2024, 6, 8), date(2024, 6, 10)),
+    )
     payload = {
         "daily": {
             "time": ["2024-06-08", "2024-06-09", "2024-06-10"],

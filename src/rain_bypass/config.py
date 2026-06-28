@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import tomllib
+from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 
 class ConfigError(ValueError):
     """Invalid or missing settings file."""
+
+
+class FrozenModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
 
 class FailMode(StrEnum):
@@ -21,15 +27,13 @@ class Provider(StrEnum):
     VISUAL_CROSSING = "visual_crossing"
 
 
-class Location(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class Location(FrozenModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     timezone: str = "UTC"
 
 
-class Watering(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class Watering(FrozenModel):
     inches_required: float
     past_days: int = Field(ge=1)
     updates_per_day: int = Field(ge=1)
@@ -39,16 +43,14 @@ class Watering(BaseModel):
         return 86400 / self.updates_per_day
 
 
-class Season(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class Season(FrozenModel):
     start_month: int = Field(ge=1, le=12)
     start_day: int = Field(ge=1, le=31)
     end_month: int = Field(ge=1, le=12)
     end_day: int = Field(ge=1, le=31)
 
 
-class Weather(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class Weather(FrozenModel):
     provider: Provider = Provider.OPEN_METEO
     visual_crossing_api_key: str | None = None
     request_timeout_seconds: int = Field(default=30, ge=1)
@@ -60,16 +62,14 @@ class Weather(BaseModel):
         return self
 
 
-class Gpio(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class Gpio(FrozenModel):
     relay: int
     watering_enabled_led: int
     watering_disabled_led: int
     mock: bool = False
 
 
-class Runtime(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class Runtime(FrozenModel):
     state_path: Path = Path("state.json")
     fail_mode: FailMode = FailMode.DISABLE_WATERING
     log_level: str = "INFO"
@@ -80,14 +80,41 @@ class Runtime(BaseModel):
         return value.upper()
 
 
-class Settings(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class Settings(FrozenModel):
     location: Location
     watering: Watering
     season: Season
     weather: Weather
     gpio: Gpio
     runtime: Runtime
+
+
+class State(FrozenModel):
+    last_weather_update: float | None = None
+    watering_required: bool | None = None
+    rainfall_inches: float | None = None
+    last_error: str | None = None
+
+    @classmethod
+    def load(cls, path: Path) -> State:
+        if not path.is_file():
+            return cls()
+        return cls.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def save(self, path: Path) -> None:
+        path.write_text(self.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+
+class Decision(FrozenModel):
+    watering_required: bool
+    rainfall_inches: float | None
+    in_season: bool
+    source: str
+    error: str | None = None
+
+
+def local_today(location: Location) -> date:
+    return datetime.now(ZoneInfo(location.timezone)).date()
 
 
 def load_settings(config_path: Path | str) -> Settings:
@@ -102,48 +129,3 @@ def load_settings(config_path: Path | str) -> Settings:
         return Settings.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
-
-
-def migrate_legacy_ini(legacy_path: Path, output_path: Path) -> None:
-    import configparser
-
-    parser = configparser.ConfigParser()
-    parser.read(legacy_path)
-    user, pins = parser["UserInput"], parser["GPIO.Pins"]
-
-    output_path.write_text(
-        "\n".join(
-            [
-                "# Migrated from settings.ini — set latitude and longitude before use.",
-                "",
-                "[location]",
-                "latitude = 0.0",
-                "longitude = 0.0",
-                f"timezone = \"{user.get('timezone', 'UTC')}\"",
-                "",
-                "[watering]",
-                f"inches_required = {user.get('inchesrequired', '0.6')}",
-                f"past_days = {user.get('raindays', '7')}",
-                f"updates_per_day = {user.get('weatherupdatesperday', '1')}",
-                "",
-                "[season]",
-                f"start_month = {user.get('firstmonthtowater', '3')}",
-                f"start_day = {user.get('firstdaytowater', '19')}",
-                f"end_month = {user.get('lastmonthtowater', '9')}",
-                f"end_day = {user.get('lastdaytowater', '12')}",
-                "",
-                "[weather]",
-                "provider = \"visual_crossing\"",
-                f"visual_crossing_api_key = \"{user.get('visualcrossingkey', '')}\"",
-                "",
-                "[gpio]",
-                f"relay = {pins.get('relayswitch', '25')}",
-                f"watering_enabled_led = {pins.get('wateringenabled', '4')}",
-                f"watering_disabled_led = {pins.get('wateringdisabled', '27')}",
-                "",
-                "[runtime]",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )

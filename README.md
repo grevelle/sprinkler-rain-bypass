@@ -39,11 +39,13 @@ On weather API failure, `fail_mode = "disable_watering"` blocks watering; `"keep
 
 ```
 src/rain_bypass/
-  config.py   settings (Pydantic)
-  weather.py    precipitation providers
-  gpio.py       relay + LED control
-  app.py        decision loop + state
-  __main__.py   CLI
+  config.py    settings + state (Pydantic)
+  weather.py   precipitation providers
+  gpio.py      relay + LED control
+  app.py       decision loop
+  __main__.py  CLI
+  py.typed
+.github/workflows/ci.yml
 docs/hardware.md
 deploy/rain-bypass.service
 ```
