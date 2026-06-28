@@ -8,20 +8,20 @@ from rain_bypass.config import Gpio, load_settings
 
 SETTINGS = """
 [location]
-latitude = 41.8781
-longitude = -87.6298
+latitude = 43.106
+longitude = -88.351
 timezone = "America/Chicago"
 
 [watering]
-inches_required = 0.6
-past_days = 7
+inches_required = 1.5
+past_days = 3
 updates_per_day = 2
 
 [season]
-start_month = 3
-start_day = 19
-end_month = 9
-end_day = 12
+start_month = 5
+start_day = 7
+end_month = 10
+end_day = 7
 
 [weather]
 api_key = "test-key"

@@ -46,6 +46,8 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
 
+**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** (43.106, -88.351), `America/Chicago`, `past_days = 3`, `inches_required = 1.5`, season **May 7–Oct 7** (local average frost window). UF/IFAS recommends ~¼″ per rain event on physical sensors; lower `inches_required` saves more water.
+
 ### Weather behavior
 
 The app calls the [Visual Crossing Timeline API](https://www.visualcrossing.com/resources/documentation/weather-api/timeline-weather-api/) with an inclusive local-date range from `past_days` ago through today (computed from `location.timezone`). Daily `precip` is summed in **inches** (`unitGroup=us`).

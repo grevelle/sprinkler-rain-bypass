@@ -37,8 +37,8 @@ def _timeline_url(settings, start: date, end: date) -> str:
 
 
 def test_load_settings(settings):
-    assert settings.location.latitude == pytest.approx(41.8781)
-    assert settings.watering.past_days == 7
+    assert settings.location.latitude == pytest.approx(43.106)
+    assert settings.watering.past_days == 3
     assert settings.watering.interval_seconds == pytest.approx(86400 / 2)
     assert settings.runtime.fail_mode is FailMode.DISABLE_WATERING
     assert settings.runtime.weather_timeout_seconds == 15
@@ -53,8 +53,8 @@ def test_missing_config(tmp_path):
 @pytest.mark.parametrize(
     ("mutator",),
     [
-        (lambda text: text.replace("latitude = 41.8781", "latitude = not_a_number"),),
-        (lambda text: text.replace("past_days = 7", "past_days = 0"),),
+        (lambda text: text.replace("latitude = 43.106", "latitude = not_a_number"),),
+        (lambda text: text.replace("past_days = 3", "past_days = 0"),),
         (lambda text: text.replace('api_key = "test-key"', 'api_key = ""'),),
     ],
 )
@@ -117,14 +117,14 @@ def test_sum_precip_day_count_mismatch_logs_warning(settings, caplog):
 
 
 def test_decide_at_threshold(settings, monkeypatch):
-    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 0.6)
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 1.5)
     required, rainfall, _, _ = decide(settings, State())
-    assert rainfall == pytest.approx(0.6)
+    assert rainfall == pytest.approx(1.5)
     assert required is True
 
 
 def test_decide_just_over_threshold(settings, monkeypatch):
-    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 0.6001)
+    monkeypatch.setattr("rain_bypass.app.fetch_precip", lambda _s: 1.5001)
     required, _, _, _ = decide(settings, State())
     assert required is False
 
@@ -144,7 +144,7 @@ def test_in_season(settings):
     season = settings.season
     assert in_season(season, date(2024, 6, 1)) is True
     assert in_season(season, date(2024, 2, 1)) is False
-    assert in_season(season, date(2024, 3, 19)) is True
+    assert in_season(season, date(2024, 5, 15)) is True
 
 
 def test_out_of_season(settings):
@@ -307,7 +307,7 @@ def test_run_once(tmp_path, settings_path):
     settings_path.write_text(
         settings_path.read_text(encoding="utf-8")
         .replace('state_path = "state.json"', f'state_path = "{state_path.as_posix()}"')
-        .replace("start_month = 3", "start_month = 12"),
+        .replace("start_month = 5", "start_month = 12"),
         encoding="utf-8",
     )
     settings = load_settings(settings_path)

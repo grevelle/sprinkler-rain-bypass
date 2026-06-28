@@ -1,18 +1,22 @@
 [location]
-latitude = 40.7128
-longitude = -74.0060
-timezone = "America/New_York"
+# Hartland, WI 53029 (Waukesha County)
+latitude = 43.106
+longitude = -88.351
+timezone = "America/Chicago"
 
 [watering]
-inches_required = 0.6
-past_days = 7
+# Block watering when cumulative rain over past_days exceeds this (inches).
+# Defaults match Hunter Hydrawise (1.5 in / 3 days); UF/IFAS sensors often use ~1/4 in per event.
+inches_required = 1.5
+past_days = 3
 updates_per_day = 1
 
 [season]
-start_month = 3
-start_day = 19
-end_month = 9
-end_day = 12
+# Hartland 53029 — Almanac avg. last spring frost May 7, first fall frost Oct 7.
+start_month = 5
+start_day = 7
+end_month = 10
+end_day = 7
 
 [weather]
 api_key = "YOUR_VISUAL_CROSSING_API_KEY"

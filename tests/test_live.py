@@ -22,7 +22,7 @@ pytestmark = [
 ]
 
 LIVE_SITES = (
-    ("nyc", 40.7128, -74.0060, "America/New_York"),
+    ("hartland", 43.106, -88.351, "America/Chicago"),
     ("chicago", 41.8781, -87.6298, "America/Chicago"),
     ("phoenix", 33.4484, -112.0740, "America/Phoenix"),
 )

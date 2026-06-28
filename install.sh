@@ -10,6 +10,25 @@ PYTHON="${VENV}/bin/python"
 SETTINGS="${ROOT}/settings.toml"
 SERVICE_NAME="rain-bypass"
 
+# Watering defaults (research-backed; user can override at prompts):
+# - past_days=3: Hunter Hydrawise uses a 3-day cumulative rainfall window.
+# - inches_required=1.5: Hydrawise default "skip if >1.5 in over 3 days" (cumulative).
+#   UF/IFAS physical rain sensors use ~1/4 in per event; this app sums recent days instead.
+# - updates_per_day=1: once daily matches smart-controller weather checks and saves API quota.
+# Location defaults: Hartland, WI 53029 (Waukesha County zip centroid).
+# Frost dates (Almanac / nearest Waukesha station): last spring ~May 7, first fall ~Oct 7.
+# - season May 7–Oct 7: Hartland turf irrigation window aligned to local frost normals.
+DEFAULT_LATITUDE="43.106"
+DEFAULT_LONGITUDE="-88.351"
+DEFAULT_TIMEZONE="America/Chicago"
+DEFAULT_INCHES_REQUIRED="1.5"
+DEFAULT_PAST_DAYS="3"
+DEFAULT_UPDATES_PER_DAY="1"
+DEFAULT_SEASON_START_MONTH="5"
+DEFAULT_SEASON_START_DAY="7"
+DEFAULT_SEASON_END_MONTH="10"
+DEFAULT_SEASON_END_DAY="7"
+
 info() { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -70,22 +89,27 @@ collect_settings() {
   info "Configuration (Enter accepts the default in brackets)"
   echo
 
-  prompt LATITUDE "Latitude (decimal degrees)" "40.7128"
-  prompt LONGITUDE "Longitude (decimal degrees)" "-74.0060"
-  prompt TIMEZONE 'Timezone (IANA, e.g. America/Chicago)' "America/New_York"
+  info "Location (53029 Hartland, WI defaults — change if your controller is elsewhere)"
+  prompt LATITUDE "Latitude (decimal degrees)" "$DEFAULT_LATITUDE"
+  prompt LONGITUDE "Longitude (decimal degrees)" "$DEFAULT_LONGITUDE"
+  prompt TIMEZONE 'Timezone (IANA, e.g. America/Chicago)' "$DEFAULT_TIMEZONE"
 
   echo
   info "Watering thresholds"
-  prompt INCHES_REQUIRED "Rain threshold to block watering (inches)" "0.6"
-  prompt PAST_DAYS "Lookback window (days)" "7"
-  prompt UPDATES_PER_DAY "Weather checks per day" "1"
+  echo "  Defaults follow smart-controller practice: block when recent cumulative rain"
+  echo "  exceeds the threshold over the lookback window (Hunter Hydrawise: 1.5 in / 3 days)."
+  echo "  UF/IFAS recommends ~1/4 in per rain event on physical sensors; lower values save more water."
+  prompt INCHES_REQUIRED "Block watering if total rain exceeds (inches)" "$DEFAULT_INCHES_REQUIRED"
+  prompt PAST_DAYS "Sum rain over this many days (lookback window)" "$DEFAULT_PAST_DAYS"
+  prompt UPDATES_PER_DAY "Weather checks per day (1 is usually enough)" "$DEFAULT_UPDATES_PER_DAY"
 
   echo
-  info "Watering season (controller ignores rain bypass outside these dates)"
-  prompt SEASON_START_MONTH "Season start month (1-12)" "3"
-  prompt SEASON_START_DAY "Season start day (1-31)" "19"
-  prompt SEASON_END_MONTH "Season end month (1-12)" "9"
-  prompt SEASON_END_DAY "Season end day (1-31)" "12"
+  info "Watering season (rain bypass active only between these dates)"
+  echo "  Default May 7–Oct 7 matches Hartland (53029) average frost dates."
+  prompt SEASON_START_MONTH "Season start month (1-12)" "$DEFAULT_SEASON_START_MONTH"
+  prompt SEASON_START_DAY "Season start day (1-31)" "$DEFAULT_SEASON_START_DAY"
+  prompt SEASON_END_MONTH "Season end month (1-12)" "$DEFAULT_SEASON_END_MONTH"
+  prompt SEASON_END_DAY "Season end day (1-31)" "$DEFAULT_SEASON_END_DAY"
 
   echo
   info "Visual Crossing API (free key: https://www.visualcrossing.com/weather-api)"
@@ -165,7 +189,6 @@ validate_settings() {
 test_api() {
   info "Testing Visual Crossing API (one fetch)"
   "$PYTHON" <<'PY'
-import os
 import sys
 from rain_bypass.app import fetch_precip, precip_window
 from rain_bypass.config import load_settings
