@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Pi Zero W tuning: safe GPIO boot state, systemd memory cap, installer/SD-card pip flags, README platform notes.
+- `install.sh` prerequisite checks on apt-based systems (python3-venv, git, Pi build packages) with optional auto-install.
 
 ### Changed
 

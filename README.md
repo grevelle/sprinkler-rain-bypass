@@ -8,7 +8,7 @@ Get a free API key at [Visual Crossing](https://www.visualcrossing.com/weather-a
 
 ## Setup
 
-On a **Raspberry Pi Zero W**, use **Raspberry Pi OS Bookworm** (32-bit is fine) so you get **Python 3.11+**. Run the interactive installer — it applies defaults from `settings.example.toml`, resolves your **ZIP code** to coordinates (default **53029**), and only requires your Visual Crossing **API key** (press Enter everywhere else):
+On a **Raspberry Pi Zero W**, use **Raspberry Pi OS Bookworm** (32-bit is fine) so you get **Python 3.11+**. Run the interactive installer — it checks for missing apt packages (venv, git, build tools on the Pi), applies defaults from `settings.example.toml`, resolves your **ZIP code** to coordinates (default **53029**), and only requires your Visual Crossing **API key** (press Enter everywhere else):
 
 ```bash
 git clone https://github.com/grevelle/sprinkler-rain-bypass.git
@@ -21,7 +21,7 @@ Manual setup (or development off the Pi):
 
 ```bash
 pip install -e ".[dev,gpio]"    # use [gpio] on the Pi
-cp settings.example.toml settings.toml   # edit coordinates, pins, API key
+cp settings.example.toml settings.toml   # edit api_key (and zip_code if not 53029)
 ```
 
 `settings.example.toml` is the canonical default config. Tests and `rain_bypass.settings_io` derive settings from it. Run `./install.sh` (or `rain-bypass-install`) for the interactive setup wizard.
@@ -31,6 +31,7 @@ cp settings.example.toml settings.toml   # edit coordinates, pins, API key
 | Topic | Recommendation |
 | ----- | -------------- |
 | OS | Raspberry Pi OS **Bookworm** (Bullseye’s Python 3.9 is too old) |
+| Prerequisites | `./install.sh` checks for **python3-venv**, **git**, and on the Pi **python3-dev** + **build-essential**; offers `sudo apt-get install` if anything is missing |
 | First install | `./install.sh` on a Zero W can take **10–20 minutes** (slow CPU + SD card) |
 | Wi‑Fi | Stable connection required for Visual Crossing; default API timeout is **45 s** |
 | GPIO library | **`RPi.GPIO`** — correct for Zero W’s classic BCM2835 GPIO |
