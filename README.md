@@ -34,14 +34,14 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 ## Config (`settings.toml`)
 
 
-| Section    | Keys                                                              |
-| ---------- | ----------------------------------------------------------------- |
+| Section    | Keys                                                                    |
+| ---------- | ----------------------------------------------------------------------- |
 | `location` | `latitude`, `longitude`, `timezone` (IANA name, e.g. `America/Chicago`) |
-| `watering` | `inches_required`, `past_days`, `updates_per_day`                 |
-| `season`   | `start_month/day`, `end_month/day`                                |
-| `weather`  | `api_key` (Visual Crossing Timeline API)                          |
-| `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`  |
-| `runtime`  | `state_path`, `fail_mode`, `log_level`, `weather_timeout_seconds` |
+| `watering` | `inches_required`, `past_days`, `updates_per_day`                       |
+| `season`   | `start_month/day`, `end_month/day`                                      |
+| `weather`  | `api_key` (Visual Crossing Timeline API)                                |
+| `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`        |
+| `runtime`  | `state_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`       |
 
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
