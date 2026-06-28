@@ -24,7 +24,13 @@ Pin numbers are configurable in `settings.toml` under `[gpio]`.
 
 ## Photos
 
-Hardware photos from the original build are in the repo root (`IMG_0123.JPG`, `IMG_0124.JPG`). Consider moving them to `docs/images/` in a future commit to keep the repository root focused on code.
+### Front view
+
+![Front view of the rain bypass build](images/IMG_0123.JPG)
+
+### Side view
+
+![Side view of the rain bypass build](images/IMG_0124.JPG)
 
 ## Safety notes
 

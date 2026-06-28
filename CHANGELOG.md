@@ -11,6 +11,7 @@
 - Mock GPIO mode for development
 - Configurable fail-safe behavior on API errors
 - pytest suite and systemd unit under `deploy/`
+- Restored original hardware photos under `docs/images/`
 - Migration script for v1 `settings.ini`
 
 ## 1.x
