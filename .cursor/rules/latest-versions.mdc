@@ -38,6 +38,6 @@ Local hooks call **pip-installed** tools (`ruff`, `shellcheck` via `shellcheck-p
 
 Do not set `requires-python`, Ruff `target-version`, or Pyright `pythonVersion` — let tools follow the installed runtime.
 
-## Before commit
+## Before finishing work
 
-Run `.\scripts\ci.ps1` or `./scripts/ci.sh` (must pass).
+See **ci-gate** rule: run `.\scripts\ci.ps1` or `./scripts/ci.sh` and fix all failures before commit, push, or telling the user the task is done.
