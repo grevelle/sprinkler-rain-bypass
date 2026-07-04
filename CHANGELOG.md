@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-07-04
+
 ### Added
 
 - **`rain-bypass status`** — read-only text dashboard (weather, balance, relay, “would decide”); `--cached` skips the API.
@@ -75,7 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Visual Crossing Timeline API replaces Open-Meteo.
 - Pydantic v2 config, 100% test coverage enforced in CI.
 
-[Unreleased]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v5.0.0...HEAD
+[Unreleased]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v5.1.0...HEAD
+[5.1.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v4.0.0...v5.0.0
 [4.0.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v3.2.0...v4.0.0
 [3.2.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v3.1.0...v3.2.0
