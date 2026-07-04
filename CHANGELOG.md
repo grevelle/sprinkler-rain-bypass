@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`rain-bypass status`** — read-only text dashboard (weather, balance, relay, “would decide”); `--cached` skips the API.
+- **`./configure.sh`** — fast reconfigure of API key and ZIP without a full `./install.sh`.
+
+### Changed
+
+- Default **`balance.inches_per_cycle`** is **0.3** (30 min/zone daily program).
+
 ## [5.0.0] - 2025-06-27
 
 ### Added

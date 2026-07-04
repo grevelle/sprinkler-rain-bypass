@@ -52,18 +52,108 @@ sudo systemctl restart rain-bypass
 | Relay module | **3.3 V** logic (see Hardware below) |
 | systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
 
-On boot the relay **blocks watering** until the first check completes, then restores the last saved state from `state.json` while fetching weather.
+On boot the relay **blocks watering** until the first check completes, then applies the decision from the daily check.
 
-## Run
+## Usage
+
+Once installed, the Pi runs as a **systemd service** (`rain-bypass`). You usually leave it alone — it wakes at the configured check time (default **4:30 AM** local), fetches weather, decides ON or OFF for that day’s irrigation cycle, and sets the relay. Rain Bird (or your controller) runs its daily program as usual; the bypass relay acts like a rain sensor.
+
+### Check status (text dashboard)
+
+Any time you want to see what the system thinks:
 
 ```bash
-python -m rain_bypass --once   # single check
-python -m rain_bypass          # loop
-python -m rain_bypass status   # text dashboard (weather, balance, relay)
-python -m rain_bypass status --cached   # saved state only; no API call
+cd ~/sprinkler-rain-bypass
+.venv/bin/python -m rain_bypass status
 ```
 
-Use `gpio.mock = true` in settings to develop off the Pi.
+Same command if you installed the console script: `rain-bypass status`.
+
+**Offline / no API call** — uses saved values from the last check only:
+
+```bash
+.venv/bin/python -m rain_bypass status --cached
+```
+
+Example output and how to read it:
+
+```text
+  Relay            BLOCK watering (relay closed / wet sensor)
+  Rain MTD         0.26 in          ← rain this month at your ZIP
+  Irrigation MTD   0.33 in          ← credited when last allowed watering
+  Target to date   0.65 in          ← prorated July grass goal (day 4 of 31)
+  Deficit          0.04 in          ← how far behind the lawn is
+  Needs / cycle    >= 0.30 in       ← must reach this to allow watering
+  Balance gate     block            ← deficit too small today
+  Safety gate      pass             ← no freeze / storm block
+  Would decide     BLOCK watering   ← what the next check would do (live fetch)
+```
+
+- **Relay** — current saved state driving the GPIO (green = allow, red = block).
+- **Balance gate** — pass only when deficit ≥ `inches_per_cycle` (grass needs water).
+- **Safety gate** — pass unless freeze or a heavy rain day in the lookback window.
+- **Would decide** — live evaluation; does **not** change the relay (read-only).
+
+`status` never runs a cycle or writes GPIO — safe to run anytime.
+
+### View logs
+
+```bash
+sudo journalctl -u rain-bypass -f          # follow live
+sudo journalctl -u rain-bypass --since today
+```
+
+Set `log_level = "DEBUG"` in `settings.toml` for API `queryCost` and extra detail (restart the service after).
+
+### Manual check (one cycle)
+
+Runs weather + decision + relay once, then exits (same as the service’s daily tick):
+
+```bash
+cd ~/sprinkler-rain-bypass
+.venv/bin/python -m rain_bypass --once
+```
+
+Use this after changing settings to verify behavior without waiting until 4:30 AM.
+
+### Change settings
+
+| What | How |
+| ---- | --- |
+| API key or ZIP | `./configure.sh` (fast; restarts service) |
+| Check time, `inches_per_cycle`, GPIO, balance, sewer | `nano settings.toml` then `sudo systemctl restart rain-bypass` |
+
+After editing `settings.toml`, run `status` or `--once` to confirm the new logic.
+
+### Update from GitHub
+
+On the Pi:
+
+```bash
+cd ~/sprinkler-rain-bypass
+git pull
+.venv/bin/pip install -e '.[gpio]'
+sudo systemctl restart rain-bypass
+.venv/bin/python -m rain_bypass status    # optional sanity check
+```
+
+### Service control
+
+```bash
+sudo systemctl status rain-bypass
+sudo systemctl restart rain-bypass
+sudo systemctl stop rain-bypass      # relay stays at last state until next run
+```
+
+### Development / off-Pi
+
+```bash
+python -m rain_bypass --once   # single check (set gpio.mock = true in settings)
+python -m rain_bypass          # loop until Ctrl+C
+python -m rain_bypass status
+```
+
+Use `gpio.mock = true` in settings to develop without a Pi.
 
 ## Config (`settings.toml`)
 
@@ -128,7 +218,7 @@ Replace `settings.toml` from the new `settings.example.toml`. Removed keys inclu
 
 ## Code
 
-Layered modules: `config`, `balance`, `settings_io`, `windows`, `weather` (httpx), `logic`, `controller`, `gpio`, `cli`, and `install_cli`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs pre-commit, Pyright (strict), and pytest at 100% coverage on the latest Python 3.x.
+Layered modules: `config`, `balance`, `settings_io`, `windows`, `weather` (httpx), `logic`, `controller`, `gpio`, `status`, `cli`, and `install_cli`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs pre-commit, Pyright (strict), and pytest at 100% coverage on the latest Python 3.x.
 
 ## Development
 
