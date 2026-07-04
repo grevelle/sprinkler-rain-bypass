@@ -79,13 +79,13 @@ def test_ensure_balance_month_resets_irrigation():
 
 def test_refresh_balance_state_credits_on_switch_on(settings):
     today = date(2024, 7, 10)
-    state = State(balance_month=7, irrigation_inches_mtd=0.33)
+    state = State(balance_month=7, irrigation_inches_mtd=0.3)
     updated = balance.refresh_balance_state(state, today, switch_on=True, settings=settings)
-    assert updated.irrigation_inches_mtd == pytest.approx(0.66)
+    assert updated.irrigation_inches_mtd == pytest.approx(0.6)
 
 
 def test_refresh_balance_state_no_credit_when_off(settings):
     today = date(2024, 7, 10)
-    state = State(balance_month=7, irrigation_inches_mtd=0.33)
+    state = State(balance_month=7, irrigation_inches_mtd=0.3)
     updated = balance.refresh_balance_state(state, today, switch_on=False, settings=settings)
-    assert updated.irrigation_inches_mtd == pytest.approx(0.33)
+    assert updated.irrigation_inches_mtd == pytest.approx(0.3)

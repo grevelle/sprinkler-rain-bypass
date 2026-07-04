@@ -6,8 +6,8 @@ longitude = -88.351
 timezone = "America/Chicago"
 
 [balance]
-# Calibrate after install: run one full Rain Bird program with catch cups, then set this.
-inches_per_cycle = 0.33
+# One daily program run (30 min/zone ≈ 0.3 in); adjust if your catch-cup test differs.
+inches_per_cycle = 0.3
 
 [watering]
 # Daily check before typical morning irrigation (Rain Bird daily program).

@@ -446,7 +446,7 @@ def test_build_settings_uses_example_defaults(monkeypatch):
     assert settings.weather.api_key == "my-test-key1"
     assert settings.location.zip_code == "53029"
     assert settings.gpio.mock is False
-    assert settings.balance.inches_per_cycle == pytest.approx(0.33)
+    assert settings.balance.inches_per_cycle == pytest.approx(0.3)
     assert settings.watering.check_hour == 4
 
 

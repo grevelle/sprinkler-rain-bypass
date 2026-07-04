@@ -70,7 +70,7 @@ def _july(settings, monkeypatch):
 
 def test_load_settings(settings):
     assert settings.location.zip_code == "53029"
-    assert settings.balance.inches_per_cycle == pytest.approx(0.33)
+    assert settings.balance.inches_per_cycle == pytest.approx(0.3)
     assert settings.balance.forecast_days == 2
     assert settings.watering.event_lookback_days == 3
     assert settings.watering.event_inches == pytest.approx(0.25)
@@ -90,7 +90,7 @@ def test_missing_config(tmp_path):
     [
         (lambda text: text.replace('zip_code = "53029"', 'zip_code = "bad"'),),
         (lambda text: text.replace("latitude = 43.106", "latitude = not_a_number"),),
-        (lambda text: text.replace("inches_per_cycle = 0.33", "inches_per_cycle = 0"),),
+        (lambda text: text.replace("inches_per_cycle = 0.3", "inches_per_cycle = 0"),),
         (lambda text: text.replace('api_key = "test-key"', 'api_key = ""'),),
     ],
 )
@@ -227,7 +227,7 @@ def test_decide_allows_when_balance_and_safety_ok(settings, monkeypatch):
     assert decision.watering_required is True
     assert decision.balance_ok is True
     assert decision.rain_mtd == pytest.approx(0.0)
-    assert decision.irrigation_inches_mtd == pytest.approx(0.33)
+    assert decision.irrigation_inches_mtd == pytest.approx(0.3)
 
 
 def test_decide_blocks_when_forecast_fills_deficit(settings, monkeypatch):
@@ -353,10 +353,10 @@ def test_tick_persists_balance_state(settings, tmp_path, monkeypatch):
     )
     monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0, 0.0, 0.0))
     saved = tick(settings, State(), lambda _required: None)
-    assert saved.irrigation_inches_mtd == pytest.approx(0.33)
+    assert saved.irrigation_inches_mtd == pytest.approx(0.3)
     assert saved.balance_month == 7
     loaded = State.load(state_path)
-    assert loaded.irrigation_inches_mtd == pytest.approx(0.33)
+    assert loaded.irrigation_inches_mtd == pytest.approx(0.3)
 
 
 def _timeline_days(

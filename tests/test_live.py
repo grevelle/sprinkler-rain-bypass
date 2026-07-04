@@ -34,7 +34,7 @@ LIVE_SITES = (
 )
 
 LIVE_SETTINGS_OVERRIDES = {
-    "balance": {"inches_per_cycle": 0.33},
+    "balance": {"inches_per_cycle": 0.3},
     "gpio": {"mock": True},
     "runtime": {"log_level": "WARNING"},
 }

@@ -385,8 +385,8 @@ def run_install(
 
     typer.echo("\n==> Done.")
     typer.echo(
-        "  Balance: seasonal ON, 0.33 in/cycle — calibrate "
-        "[balance].inches_per_cycle after a catch-cup test."
+        "  Balance: seasonal ON, 0.3 in/cycle (30 min/zone, daily program) — "
+        "edit [balance].inches_per_cycle in settings.toml if yours differs."
     )
     typer.echo(f"  Config:  {settings_path}")
     typer.echo(f"  Reconfigure: {install_root / 'configure.sh'}")

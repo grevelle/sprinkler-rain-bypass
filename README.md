@@ -59,6 +59,8 @@ On boot the relay **blocks watering** until the first check completes, then rest
 ```bash
 python -m rain_bypass --once   # single check
 python -m rain_bypass          # loop
+python -m rain_bypass status   # text dashboard (weather, balance, relay)
+python -m rain_bypass status --cached   # saved state only; no API call
 ```
 
 Use `gpio.mock = true` in settings to develop off the Pi.
@@ -79,7 +81,7 @@ Use `gpio.mock = true` in settings to develop off the Pi.
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
 
-**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** — **sewer lockout Jan 16–Mar 15**; **`balance.inches_per_cycle = 0.33`** (calibrate after install). Rain Bird should run **one daily program**; this app toggles the bypass sensor before that cycle.
+**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** — **sewer lockout Jan 16–Mar 15**; **`balance.inches_per_cycle = 0.3`** (30 min/zone ≈ 0.3 in per daily run). Schedule Rain Bird for **one program every day**; this app sets the bypass before that cycle.
 
 ### Rain Bird setup
 
