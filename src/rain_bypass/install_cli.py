@@ -12,7 +12,7 @@ from typing import Annotated, Protocol
 
 import typer
 
-from rain_bypass.config import Settings, load_settings
+from rain_bypass.config import Location, Settings, load_settings
 from rain_bypass.controller import run
 from rain_bypass.exceptions import WeatherError
 from rain_bypass.logging_setup import configure_logging
@@ -28,6 +28,14 @@ app = typer.Typer(
     no_args_is_help=False,
     pretty_exceptions_show_locals=False,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PromptDefaults:
+    zip_code: str = "53029"
+    inches_per_cycle: float = 0.3
+    check_hour: int = 4
+    check_minute: int = 30
 
 
 class Prompter(Protocol):
@@ -91,10 +99,89 @@ def validate_zip_code(value: str) -> str:
     return text[:5]
 
 
+def validate_inches_per_cycle(value: str) -> float:
+    text = value.strip()
+    try:
+        inches = float(text)
+    except ValueError as exc:
+        raise typer.BadParameter("Inches per cycle must be a number.") from exc
+    if inches <= 0:
+        raise typer.BadParameter("Inches per cycle must be greater than 0.")
+    return inches
+
+
+def validate_check_time(value: str) -> tuple[int, int]:
+    text = value.strip()
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+    if not match:
+        raise typer.BadParameter("Check time must be HH:MM in 24-hour format (e.g. 04:30).")
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if hour > 23 or minute > 59:
+        raise typer.BadParameter("Check time hour must be 0-23 and minute 0-59.")
+    return hour, minute
+
+
+def load_settings_base(settings_path: Path) -> Settings:
+    if settings_path.is_file():
+        try:
+            return load_settings(settings_path)
+        except Exception:
+            pass
+    return load_example_settings()
+
+
+def load_prompt_defaults(settings_path: Path) -> tuple[str | None, PromptDefaults]:
+    if not settings_path.is_file():
+        return None, PromptDefaults()
+    try:
+        existing = load_settings(settings_path)
+        return existing.weather.api_key, PromptDefaults(
+            zip_code=existing.location.zip_code,
+            inches_per_cycle=existing.balance.inches_per_cycle,
+            check_hour=existing.watering.check_hour,
+            check_minute=existing.watering.check_minute,
+        )
+    except Exception:
+        return None, PromptDefaults()
+
+
+def load_existing_settings_fields(settings_path: Path) -> tuple[str | None, str]:
+    key, profile = load_prompt_defaults(settings_path)
+    return key, profile.zip_code
+
+
+def apply_prompt_overrides(
+    base: Settings,
+    *,
+    location: Location,
+    api_key: str,
+    inches_per_cycle: float,
+    check_hour: int,
+    check_minute: int,
+    gpio_mock: bool,
+) -> Settings:
+    return base.model_copy(
+        update={
+            "location": location,
+            "weather": base.weather.model_copy(update={"api_key": api_key}),
+            "balance": base.balance.model_copy(update={"inches_per_cycle": inches_per_cycle}),
+            "watering": base.watering.model_copy(
+                update={"check_hour": check_hour, "check_minute": check_minute}
+            ),
+            "gpio": base.gpio.model_copy(update={"mock": gpio_mock}),
+        }
+    )
+
+
 def build_settings(
     api_key: str,
     zip_code: str = "53029",
     *,
+    base: Settings | None = None,
+    inches_per_cycle: float = 0.3,
+    check_hour: int = 4,
+    check_minute: int = 30,
     gpio_mock: bool | None = None,
 ) -> Settings:
     key = validate_api_key(api_key)
@@ -104,38 +191,47 @@ def build_settings(
         location = resolve_location(zip5, key)
     except WeatherError as exc:
         raise typer.BadParameter(str(exc)) from None
-    return load_example_settings(
-        location={
-            "zip_code": location.zip_code,
-            "latitude": location.latitude,
-            "longitude": location.longitude,
-            "timezone": location.timezone,
-        },
-        weather={"api_key": key},
-        gpio={"mock": mock},
+    settings_base = base or load_example_settings()
+    return apply_prompt_overrides(
+        settings_base,
+        location=location,
+        api_key=key,
+        inches_per_cycle=inches_per_cycle,
+        check_hour=check_hour,
+        check_minute=check_minute,
+        gpio_mock=mock,
     )
 
 
-def load_existing_settings_fields(settings_path: Path) -> tuple[str | None, str]:
-    if not settings_path.is_file():
-        return None, "53029"
-    try:
-        existing = load_settings(settings_path)
-        return existing.weather.api_key, existing.location.zip_code
-    except Exception:
-        return None, "53029"
+def prompt_watering_profile(prompter: Prompter, defaults: PromptDefaults) -> tuple[float, int, int]:
+    typer.echo(
+        "\n==> Sprinkler program — one daily run; calibrate inches per cycle with catch cups later if needed."
+    )
+    inches = validate_inches_per_cycle(
+        prompter.text(
+            "Inches per cycle (30 min/zone ≈ 0.3)",
+            default=f"{defaults.inches_per_cycle:g}",
+        )
+    )
+    check_hour, check_minute = validate_check_time(
+        prompter.text(
+            "Daily check time before irrigation (HH:MM, 24h)",
+            default=f"{defaults.check_hour:02d}:{defaults.check_minute:02d}",
+        )
+    )
+    return inches, check_hour, check_minute
 
 
 def prompt_settings(
-    _base: Settings,
+    base: Settings,
     prompter: Prompter,
     *,
     existing_key: str | None = None,
-    default_zip: str = "53029",
+    defaults: PromptDefaults | None = None,
 ) -> Settings:
+    profile = defaults or PromptDefaults()
     typer.echo(
-        "\n==> Defaults from settings.example.toml "
-        "(seasonal balance ON, 4:30 AM check; edit settings.toml to customize)\n"
+        "\n==> Press Enter for defaults from your existing settings or settings.example.toml.\n"
     )
     typer.echo("==> Visual Crossing API (free key: https://www.visualcrossing.com/weather-api)")
     while True:
@@ -145,17 +241,25 @@ def prompt_settings(
             api_key = existing_key
         else:
             api_key = prompter.secret("Visual Crossing API key")
-        zip_code = prompter.text("ZIP code", default=default_zip)
+        zip_code = prompter.text("ZIP code", default=profile.zip_code)
         if not is_raspberry_pi():
             typer.secho(
                 "warning: Raspberry Pi not detected; gpio.mock=true for this machine.",
                 fg=typer.colors.YELLOW,
             )
         try:
-            return build_settings(api_key, zip_code)
+            inches, check_hour, check_minute = prompt_watering_profile(prompter, profile)
+            return build_settings(
+                api_key,
+                zip_code,
+                base=base,
+                inches_per_cycle=inches,
+                check_hour=check_hour,
+                check_minute=check_minute,
+            )
         except typer.BadParameter as exc:
             typer.secho(str(exc), fg=typer.colors.RED, err=True)
-            typer.echo("Try again with a valid Visual Crossing API key.\n")
+            typer.echo("Try again.\n")
             existing_key = None
 
 
@@ -251,21 +355,21 @@ def run_configure(
     install_root = root or repo_root()
     settings_path = install_root / "settings.toml"
     prompts = prompter or TyperPrompter()
-    defaults = load_example_settings()
 
     typer.echo("Sprinkler Rain Bypass — configure")
     typer.echo(f"Install directory: {install_root}")
     typer.echo(
-        "Updates settings.toml only (no pip install). "
-        "For other options, edit settings.toml directly.\n"
+        "Updates prompted fields in settings.toml (no pip install). "
+        "Other options stay as-is — edit settings.toml directly for sewer, GPIO, etc.\n"
     )
 
-    existing_key, default_zip = load_existing_settings_fields(settings_path)
+    base = load_settings_base(settings_path)
+    existing_key, profile = load_prompt_defaults(settings_path)
     settings = prompt_settings(
-        defaults,
+        base,
         prompts,
         existing_key=existing_key,
-        default_zip=default_zip,
+        defaults=profile,
     )
     write_and_validate_settings(settings_path, settings)
 
@@ -333,13 +437,11 @@ def run_install(
     settings_path = install_root / "settings.toml"
     python = install_root / ".venv" / "bin" / "python"
     prompts = prompter or TyperPrompter()
-    defaults = load_example_settings()
 
     typer.echo("Sprinkler Rain Bypass — installer")
     typer.echo(f"Install directory: {install_root}")
     typer.echo(
-        "Press Enter for defaults (ZIP 53029, seasonal balance, 4:30 AM check) "
-        "except your API key.\n"
+        "Press Enter for defaults except your API key (ZIP 53029, 0.3 in/cycle, 4:30 AM check).\n"
     )
     if is_pi_zero():
         typer.secho(
@@ -347,13 +449,13 @@ def run_install(
             fg=typer.colors.YELLOW,
         )
 
-    existing_key, default_zip = load_existing_settings_fields(settings_path)
+    existing_key, profile = load_prompt_defaults(settings_path)
 
     settings = prompt_settings(
-        defaults,
+        load_example_settings(),
         prompts,
         existing_key=existing_key,
-        default_zip=default_zip,
+        defaults=profile,
     )
 
     if settings_path.is_file() and not prompts.confirm(
@@ -385,8 +487,9 @@ def run_install(
 
     typer.echo("\n==> Done.")
     typer.echo(
-        "  Balance: seasonal ON, 0.3 in/cycle (30 min/zone, daily program) — "
-        "edit [balance].inches_per_cycle in settings.toml if yours differs."
+        f"  Balance: {settings.balance.inches_per_cycle:g} in/cycle; "
+        f"check {settings.watering.check_hour:02d}:{settings.watering.check_minute:02d} "
+        f"{settings.location.timezone}"
     )
     typer.echo(f"  Config:  {settings_path}")
     typer.echo(f"  Reconfigure: {install_root / 'configure.sh'}")
@@ -430,7 +533,7 @@ def configure(
         typer.Option("--no-restart", help="Do not restart the systemd service."),
     ] = False,
 ) -> None:
-    """Update API key and ZIP without reinstalling dependencies."""
+    """Update API key, location, inches per cycle, and check time."""
     _handle_cli_errors(
         lambda: run_configure(
             skip_api_test=skip_api_test,

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.1] - 2026-07-04
+
+### Changed
+
+- **Install/configure wizard** now prompts for **`inches_per_cycle`** and **daily check time** (HH:MM); `./configure.sh` merges into existing `settings.toml` instead of resetting to the example file.
+
 ## [5.1.0] - 2026-07-04
 
 ### Added
@@ -77,7 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Visual Crossing Timeline API replaces Open-Meteo.
 - Pydantic v2 config, 100% test coverage enforced in CI.
 
-[Unreleased]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v5.1.0...HEAD
+[Unreleased]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v5.1.1...HEAD
+[5.1.1]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v5.1.0...v5.1.1
 [5.1.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v4.0.0...v5.0.0
 [4.0.0]: https://github.com/grevelle/sprinkler-rain-bypass/compare/v3.2.0...v4.0.0

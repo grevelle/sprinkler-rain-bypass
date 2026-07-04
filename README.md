@@ -26,14 +26,16 @@ cp settings.example.toml settings.toml   # edit api_key (and zip_code if not 530
 
 `settings.example.toml` is the canonical default config. Tests and `rain_bypass.settings_io` derive settings from it. Run `./install.sh` (or `rain-bypass-install`) for the interactive setup wizard.
 
-**Change API key or ZIP later** (skips apt/pip — usually seconds):
+**Change API key, ZIP, inches per cycle, or check time** (skips apt/pip — usually seconds):
 
 ```bash
 chmod +x configure.sh   # once
 ./configure.sh
 ```
 
-For other options (`check_hour`, `inches_per_cycle`, GPIO pins, etc.), edit `settings.toml` directly and restart the service:
+Prompts update location (ZIP lookup), `inches_per_cycle`, and daily check time. **Other settings** (sewer window, GPIO, monthly balance overrides) are preserved and left unchanged.
+
+For options not in the wizard, edit `settings.toml` directly and restart the service:
 
 ```bash
 nano settings.toml
@@ -120,8 +122,8 @@ Use this after changing settings to verify behavior without waiting until 4:30 A
 
 | What | How |
 | ---- | --- |
-| API key or ZIP | `./configure.sh` (fast; restarts service) |
-| Check time, `inches_per_cycle`, GPIO, balance, sewer | `nano settings.toml` then `sudo systemctl restart rain-bypass` |
+| API key, ZIP, inches/cycle, check time | `./configure.sh` (fast; restarts service) |
+| Sewer window, GPIO, monthly balance, etc. | `nano settings.toml` then `sudo systemctl restart rain-bypass` |
 
 After editing `settings.toml`, run `status` or `--once` to confirm the new logic.
 

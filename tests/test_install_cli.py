@@ -13,14 +13,18 @@ from rain_bypass.config import Location, load_settings
 from rain_bypass.exceptions import WeatherError
 from rain_bypass.install_cli import (
     SERVICE_NAME,
+    PromptDefaults,
     TyperPrompter,
     app,
     build_settings,
     ensure_state_writable,
     install_systemd_unit,
     load_existing_settings_fields,
+    load_prompt_defaults,
+    load_settings_base,
     main,
     prompt_settings,
+    prompt_watering_profile,
     render_systemd_unit,
     repo_root,
     resolve_state_path,
@@ -29,6 +33,8 @@ from rain_bypass.install_cli import (
     run_configure,
     run_install,
     validate_api_key,
+    validate_check_time,
+    validate_inches_per_cycle,
     validate_zip_code,
     write_and_validate_settings,
     write_settings_secure,
@@ -187,6 +193,31 @@ def test_restart_service_if_installed_declined(monkeypatch):
     assert calls == []
 
 
+def test_run_configure_preserves_other_sections(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.restart_service_if_installed",
+        lambda **_kwargs: None,
+    )
+    settings_path = tmp_path / "settings.toml"
+    write_settings_secure(
+        settings_path,
+        load_example_settings(
+            weather={"api_key": "existing-key1"},
+            sewer={"start_day": 20},
+            balance={"inches_per_cycle": 0.33},
+        ),
+    )
+    prompter = FakePrompter(confirms=[True], answers=["53029", "0.33", "05:00"])
+    run_configure(tmp_path, prompter=prompter, skip_service_restart=True)
+    settings = load_settings(settings_path)
+    assert settings.weather.api_key == "existing-key1"
+    assert settings.sewer.start_day == 20
+    assert settings.balance.inches_per_cycle == pytest.approx(0.33)
+    assert settings.watering.check_hour == 5
+
+
 def test_run_configure_writes_settings(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
@@ -279,6 +310,63 @@ def test_validate_zip_code():
     assert validate_zip_code(" 53029-1234 ") == "53029"
     with pytest.raises(typer.BadParameter, match="ZIP code"):
         validate_zip_code("bad")
+
+
+def test_validate_inches_per_cycle():
+    assert validate_inches_per_cycle("0.3") == pytest.approx(0.3)
+    assert validate_inches_per_cycle(" 0.33 ") == pytest.approx(0.33)
+    with pytest.raises(typer.BadParameter, match="number"):
+        validate_inches_per_cycle("abc")
+    with pytest.raises(typer.BadParameter, match="greater than 0"):
+        validate_inches_per_cycle("0")
+
+
+def test_validate_check_time():
+    assert validate_check_time("04:30") == (4, 30)
+    assert validate_check_time("5:00") == (5, 0)
+    with pytest.raises(typer.BadParameter, match="HH:MM"):
+        validate_check_time("430")
+    with pytest.raises(typer.BadParameter, match="0-23"):
+        validate_check_time("24:00")
+
+
+def test_load_prompt_defaults_missing(tmp_path: Path):
+    key, profile = load_prompt_defaults(tmp_path / "settings.toml")
+    assert key is None
+    assert profile == PromptDefaults()
+
+
+def test_load_prompt_defaults_ok(tmp_path: Path):
+    path = tmp_path / "settings.toml"
+    write_settings_secure(
+        path,
+        load_example_settings(
+            weather={"api_key": "existing-key1"},
+            balance={"inches_per_cycle": 0.33},
+            watering={"check_hour": 5, "check_minute": 0},
+        ),
+    )
+    key, profile = load_prompt_defaults(path)
+    assert key == "existing-key1"
+    assert profile.zip_code == "53029"
+    assert profile.inches_per_cycle == pytest.approx(0.33)
+    assert profile.check_hour == 5
+    assert profile.check_minute == 0
+
+
+def test_load_settings_base_uses_existing(tmp_path: Path):
+    path = tmp_path / "settings.toml"
+    custom = load_example_settings(sewer={"start_day": 20})
+    write_settings_secure(path, custom)
+    loaded = load_settings_base(path)
+    assert loaded.sewer.start_day == 20
+
+
+def test_load_settings_base_falls_back_to_example(tmp_path: Path):
+    path = tmp_path / "settings.toml"
+    path.write_text("not valid", encoding="utf-8")
+    loaded = load_settings_base(path)
+    assert loaded.balance.inches_per_cycle == pytest.approx(0.3)
 
 
 def test_resolve_state_path_relative(tmp_path: Path):
@@ -387,7 +475,36 @@ def test_prompt_settings_builds_toml(tmp_path, monkeypatch):
     assert settings.location.zip_code == "53029"
     assert settings.gpio.mock is False
     assert settings.location.latitude == pytest.approx(43.106)
-    assert prompter.text_calls == [("ZIP code", "53029")]
+    assert prompter.text_calls == [
+        ("ZIP code", "53029"),
+        ("Inches per cycle (30 min/zone ≈ 0.3)", "0.3"),
+        ("Daily check time before irrigation (HH:MM, 24h)", "04:30"),
+    ]
+
+
+def test_prompt_watering_profile_custom_values():
+    profile = PromptDefaults(inches_per_cycle=0.33, check_hour=5, check_minute=15)
+    prompter = FakePrompter(answers=["0.4", "06:00"])
+    inches, hour, minute = prompt_watering_profile(prompter, profile)
+    assert inches == pytest.approx(0.4)
+    assert hour == 6
+    assert minute == 0
+
+
+def test_build_settings_preserves_base_sections(monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    base = load_example_settings(sewer={"start_day": 20})
+    settings = build_settings(
+        "my-test-key1",
+        "53029",
+        base=base,
+        inches_per_cycle=0.33,
+        check_hour=5,
+        check_minute=0,
+    )
+    assert settings.sewer.start_day == 20
+    assert settings.balance.inches_per_cycle == pytest.approx(0.33)
+    assert settings.watering.check_hour == 5
 
 
 def test_prompt_settings_retries_on_bad_api_key(monkeypatch):
@@ -442,7 +559,13 @@ def test_run_install_keeps_existing_api_key(tmp_path, monkeypatch):
 
 def test_build_settings_uses_example_defaults(monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    settings = build_settings("my-test-key1", "53029")
+    settings = build_settings(
+        "my-test-key1",
+        "53029",
+        inches_per_cycle=0.3,
+        check_hour=4,
+        check_minute=30,
+    )
     assert settings.weather.api_key == "my-test-key1"
     assert settings.location.zip_code == "53029"
     assert settings.gpio.mock is False
