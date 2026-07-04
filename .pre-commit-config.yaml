@@ -18,6 +18,12 @@ repos:
         entry: shellcheck
         language: system
         files: ^install\.sh$
+      - id: check-lf
+        name: check LF line endings
+        entry: python scripts/check_lf.py
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: pyright
         name: pyright
         entry: pyright

@@ -133,7 +133,7 @@ Run the same checks as GitHub Actions manually (recommended on Windows before ev
 ./scripts/ci.sh
 ```
 
-If Ruff auto-fixes imports during a hook run, stage those edits and commit again. `.gitattributes` keeps `install.sh` LF so ShellCheck matches Linux CI. Hooks use latest pip packages (`ruff`, `shellcheck-py`) — nothing is version-pinned in config files.
+If Ruff auto-fixes imports during a hook run, stage those edits and commit again. `.gitattributes` and `.editorconfig` keep **LF** line endings on all platforms (required for Pi and Linux CI). Hooks use latest pip packages (`ruff`, `shellcheck-py`) — nothing is version-pinned in config files.
 
 Pyright alone: `pyright`
 

@@ -1,5 +1,19 @@
-# Keep shell scripts and workflow files LF so ShellCheck and GitHub Actions match Linux CI.
-*.sh text eol=lf
-*.bash text eol=lf
-.github/** text eol=lf
-.pre-commit-config.yaml text eol=lf
+# Enforce Linux (LF) line endings for all text files on every platform.
+* text=auto eol=lf
+
+# Binary assets — do not line-end convert.
+*.jpg binary
+*.jpeg binary
+*.JPG binary
+*.JPEG binary
+*.png binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+
+# Shell entrypoints (LF + executable in git).
+install.sh text eol=lf
+scripts/ci.sh text eol=lf
