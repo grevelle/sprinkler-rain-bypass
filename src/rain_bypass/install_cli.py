@@ -14,6 +14,7 @@ import typer
 
 from rain_bypass.config import Settings, load_settings
 from rain_bypass.controller import run
+from rain_bypass.exceptions import WeatherError
 from rain_bypass.logging_setup import configure_logging
 from rain_bypass.platform import is_pi_zero, is_raspberry_pi
 from rain_bypass.settings_io import load_example_settings, write_settings
@@ -71,11 +72,16 @@ def render_systemd_unit(root: Path, python: Path, settings: Path, service_user: 
 
 
 def validate_api_key(key: str) -> str:
-    if not key:
+    text = key.strip()
+    if not text:
         raise typer.BadParameter("API key cannot be empty.")
-    if '"' in key or "\\" in key:
+    if len(text) < 10:
+        raise typer.BadParameter(
+            "API key looks too short; paste the full key from Visual Crossing."
+        )
+    if '"' in text or "\\" in text:
         raise typer.BadParameter("API key contains invalid characters for settings.toml.")
-    return key
+    return text
 
 
 def validate_zip_code(value: str) -> str:
@@ -94,7 +100,10 @@ def build_settings(
     key = validate_api_key(api_key)
     zip5 = validate_zip_code(zip_code)
     mock = not is_raspberry_pi() if gpio_mock is None else gpio_mock
-    location = resolve_location(zip5, key)
+    try:
+        location = resolve_location(zip5, key)
+    except WeatherError as exc:
+        raise typer.BadParameter(str(exc)) from None
     return load_example_settings(
         location={
             "zip_code": location.zip_code,
@@ -107,20 +116,36 @@ def build_settings(
     )
 
 
-def prompt_settings(_base: Settings, prompter: Prompter) -> Settings:
+def prompt_settings(
+    _base: Settings,
+    prompter: Prompter,
+    *,
+    existing_key: str | None = None,
+) -> Settings:
     typer.echo(
         "\n==> Defaults from settings.example.toml "
         "(seasonal balance ON, 4:30 AM check; edit settings.toml to customize)\n"
     )
     typer.echo("==> Visual Crossing API (free key: https://www.visualcrossing.com/weather-api)")
-    api_key = prompter.secret("Visual Crossing API key")
-    zip_code = prompter.text("ZIP code", default="53029")
-    if not is_raspberry_pi():
-        typer.secho(
-            "warning: Raspberry Pi not detected; gpio.mock=true for this machine.",
-            fg=typer.colors.YELLOW,
-        )
-    return build_settings(api_key, zip_code)
+    while True:
+        if existing_key and prompter.confirm(
+            "Keep existing Visual Crossing API key?", default=True
+        ):
+            api_key = existing_key
+        else:
+            api_key = prompter.secret("Visual Crossing API key")
+        zip_code = prompter.text("ZIP code", default="53029")
+        if not is_raspberry_pi():
+            typer.secho(
+                "warning: Raspberry Pi not detected; gpio.mock=true for this machine.",
+                fg=typer.colors.YELLOW,
+            )
+        try:
+            return build_settings(api_key, zip_code)
+        except typer.BadParameter as exc:
+            typer.secho(str(exc), fg=typer.colors.RED, err=True)
+            typer.echo("Try again with a valid Visual Crossing API key.\n")
+            existing_key = None
 
 
 def _is_posix() -> bool:
@@ -226,7 +251,14 @@ def run_install(
             fg=typer.colors.YELLOW,
         )
 
-    settings = prompt_settings(defaults, prompts)
+    existing_key: str | None = None
+    if settings_path.is_file():
+        try:
+            existing_key = load_settings(settings_path).weather.api_key
+        except Exception:
+            existing_key = None
+
+    settings = prompt_settings(defaults, prompts, existing_key=existing_key)
 
     if settings_path.is_file() and not prompts.confirm(
         "settings.toml already exists. Overwrite?", default=True
@@ -246,7 +278,7 @@ def run_install(
             message = weather_api_smoke(load_settings(settings_path))
         except Exception as exc:
             typer.secho(f"API test failed: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(1) from exc
+            raise typer.Exit(1) from None
         typer.echo(message)
 
     if not skip_once and prompts.confirm("Run a live --once cycle now?", default=True):
@@ -258,7 +290,7 @@ def run_install(
             run(once_settings, once=True)
         except Exception as exc:
             typer.secho(f"Control cycle failed: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(1) from exc
+            raise typer.Exit(1) from None
 
     if not skip_systemd:
         install_systemd_unit(
@@ -284,8 +316,12 @@ def install() -> None:
         run_install()
     except typer.Exit:
         raise
-    except typer.BadParameter:
-        raise
+    except typer.BadParameter as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    except WeatherError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
     except KeyboardInterrupt:
         typer.echo("\nAborted.", err=True)
         raise typer.Exit(130) from None

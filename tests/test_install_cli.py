@@ -27,6 +27,7 @@ from rain_bypass.install_cli import (
     validate_zip_code,
     write_settings_secure,
 )
+from rain_bypass.exceptions import WeatherError
 from rain_bypass.settings_io import load_example_settings
 
 
@@ -66,15 +67,17 @@ class FakePrompter:
     def secret(self, label: str) -> str:
         if self.secrets:
             return self.secrets.pop(0)
-        return "test-key"
+        return "test-key-001"
 
 
 def test_validate_api_key():
-    assert validate_api_key("abc123") == "abc123"
+    assert validate_api_key("abcdef1234") == "abcdef1234"
     with pytest.raises(typer.BadParameter, match="cannot be empty"):
         validate_api_key("")
+    with pytest.raises(typer.BadParameter, match="too short"):
+        validate_api_key("abc123")
     with pytest.raises(typer.BadParameter, match="invalid characters"):
-        validate_api_key('bad"key')
+        validate_api_key('abcdefghij"key')
 
 
 def test_validate_zip_code():
@@ -176,19 +179,69 @@ def test_render_systemd_unit_missing_template(monkeypatch, tmp_path):
 
 def test_prompt_settings_builds_toml(tmp_path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    prompter = FakePrompter(secrets=["prompted-key"])
+    prompter = FakePrompter(secrets=["prompted-key1"])
     settings = prompt_settings(load_example_settings(), prompter)
-    assert settings.weather.api_key == "prompted-key"
+    assert settings.weather.api_key == "prompted-key1"
     assert settings.location.zip_code == "53029"
     assert settings.gpio.mock is False
     assert settings.location.latitude == pytest.approx(43.106)
     assert prompter.text_calls == [("ZIP code", "53029")]
 
 
+def test_prompt_settings_retries_on_bad_api_key(monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+
+    def fake_resolve(_zip_code: str, api_key: str, **_kwargs) -> Location:
+        if api_key == "bad-key-001":
+            raise WeatherError("visual crossing unauthorized; check api_key")
+        return Location(
+            zip_code="53029",
+            latitude=43.106,
+            longitude=-88.351,
+            timezone="America/Chicago",
+        )
+
+    monkeypatch.setattr("rain_bypass.install_cli.resolve_location", fake_resolve)
+    prompter = FakePrompter(secrets=["bad-key-001", "good-key-001"])
+    settings = prompt_settings(load_example_settings(), prompter)
+    assert settings.weather.api_key == "good-key-001"
+
+
+def test_prompt_settings_keeps_existing_api_key(tmp_path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    existing = load_example_settings(weather={"api_key": "existing-key1"})
+    prompter = FakePrompter(confirms=[True])
+    settings = prompt_settings(
+        load_example_settings(),
+        prompter,
+        existing_key=existing.weather.api_key,
+    )
+    assert settings.weather.api_key == "existing-key1"
+    assert prompter.secrets == []
+
+
+def test_run_install_keeps_existing_api_key(tmp_path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    settings_path = tmp_path / "settings.toml"
+    write_settings_secure(
+        settings_path,
+        load_example_settings(weather={"api_key": "existing-key1"}),
+    )
+    prompter = FakePrompter(confirms=[True, True, False, False])
+    run_install(
+        tmp_path,
+        prompter=prompter,
+        skip_systemd=True,
+        skip_once=True,
+    )
+    assert load_settings(settings_path).weather.api_key == "existing-key1"
+
+
 def test_build_settings_uses_example_defaults(monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    settings = build_settings("my-key", "53029")
-    assert settings.weather.api_key == "my-key"
+    settings = build_settings("my-test-key1", "53029")
+    assert settings.weather.api_key == "my-test-key1"
     assert settings.location.zip_code == "53029"
     assert settings.gpio.mock is False
     assert settings.balance.inches_per_cycle == pytest.approx(0.33)
@@ -197,8 +250,19 @@ def test_build_settings_uses_example_defaults(monkeypatch):
 
 def test_build_settings_mock_gpio_off_pi(monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: False)
-    settings = build_settings("my-key", "53029")
+    settings = build_settings("my-test-key1", "53029")
     assert settings.gpio.mock is True
+
+
+def test_build_settings_maps_weather_error(monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+
+    def _fail(*_args, **_kwargs):
+        raise WeatherError("visual crossing unauthorized; check api_key")
+
+    monkeypatch.setattr("rain_bypass.install_cli.resolve_location", _fail)
+    with pytest.raises(typer.BadParameter, match="unauthorized"):
+        build_settings("my-test-key1", "53029")
 
 
 def test_build_settings_rejects_empty_api_key():
@@ -208,10 +272,10 @@ def test_build_settings_rejects_empty_api_key():
 
 def test_write_settings_secure(tmp_path):
     path = tmp_path / "settings.toml"
-    settings = load_example_settings(weather={"api_key": "secure-key"})
+    settings = load_example_settings(weather={"api_key": "secure-key1"})
     write_settings_secure(path, settings)
     assert path.read_text(encoding="utf-8")
-    assert load_settings(path).weather.api_key == "secure-key"
+    assert load_settings(path).weather.api_key == "secure-key1"
 
 
 def test_install_systemd_unit_skips_without_systemctl(monkeypatch):
@@ -290,7 +354,7 @@ def test_write_settings_secure_chmod(tmp_path, monkeypatch):
         lambda path, mode: chmod_calls.append((path, mode)),
     )
     path = tmp_path / "settings.toml"
-    write_settings_secure(path, load_example_settings(weather={"api_key": "chmod-key"}))
+    write_settings_secure(path, load_example_settings(weather={"api_key": "chmod-key01"}))
     assert chmod_calls == [(path, 0o600)]
 
 
@@ -309,7 +373,7 @@ def test_write_settings_secure_skips_chmod_on_non_posix(tmp_path, monkeypatch):
 
 def test_run_install_skip_api_test(tmp_path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    prompter = FakePrompter(secrets=["live-key"], confirms=[True, False, False])
+    prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False, False])
     run_install(
         tmp_path,
         prompter=prompter,
@@ -322,7 +386,7 @@ def test_run_install_skip_api_test(tmp_path, monkeypatch):
 def test_run_install_pi_zero_notice(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("rain_bypass.install_cli.is_pi_zero", lambda: True)
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    prompter = FakePrompter(secrets=["live-key"], confirms=[True, False, False])
+    prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False, False])
     run_install(
         tmp_path,
         prompter=prompter,
@@ -337,7 +401,7 @@ def test_run_install_runs_once_successfully(tmp_path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
     monkeypatch.setattr("rain_bypass.install_cli.run", lambda *_args, **_kwargs: None)
-    prompter = FakePrompter(secrets=["live-key"], confirms=[True, True, False])
+    prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, True, False])
     run_install(tmp_path, prompter=prompter, skip_systemd=True)
 
 
@@ -353,7 +417,7 @@ def test_run_install_shows_service_status(tmp_path, monkeypatch):
         return original_is_file(self)
 
     monkeypatch.setattr(Path, "is_file", is_file)
-    prompter = FakePrompter(secrets=["live-key"], confirms=[True, False, False])
+    prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False, False])
     run_install(
         tmp_path,
         prompter=prompter,
@@ -370,7 +434,7 @@ def test_run_install_invokes_systemd(tmp_path, monkeypatch):
         "rain_bypass.install_cli.install_systemd_unit",
         lambda *args, **kwargs: invoked.append(True),
     )
-    prompter = FakePrompter(secrets=["live-key"], confirms=[True, False])
+    prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False])
     run_install(tmp_path, prompter=prompter, skip_once=True)
     assert invoked == [True]
 
@@ -381,7 +445,7 @@ def test_run_install_writes_settings(tmp_path, monkeypatch):
         "rain_bypass.install_cli.weather_api_smoke",
         lambda _settings: "API OK",
     )
-    prompter = FakePrompter(secrets=["live-key"], confirms=[True, False, False])
+    prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False, False])
     run_install(
         tmp_path,
         prompter=prompter,
@@ -390,13 +454,13 @@ def test_run_install_writes_settings(tmp_path, monkeypatch):
     )
     settings_path = tmp_path / "settings.toml"
     assert settings_path.is_file()
-    assert load_settings(settings_path).weather.api_key == "live-key"
+    assert load_settings(settings_path).weather.api_key == "live-key-001"
 
 
 def test_run_install_aborts_on_existing_settings(tmp_path):
     settings_path = tmp_path / "settings.toml"
     settings_path.write_text("existing = true\n", encoding="utf-8")
-    prompter = FakePrompter(secrets=["key"], confirms=[False])
+    prompter = FakePrompter(secrets=["valid-key01"], confirms=[False])
     with pytest.raises(typer.Exit) as exc:
         run_install(
             tmp_path,
@@ -415,7 +479,7 @@ def test_run_install_api_failure(tmp_path, monkeypatch):
         raise RuntimeError("api down")
 
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", _boom)
-    prompter = FakePrompter(secrets=["key"], confirms=[True])
+    prompter = FakePrompter(secrets=["valid-key01"], confirms=[True])
     with pytest.raises(typer.Exit) as exc:
         run_install(tmp_path, prompter=prompter, skip_systemd=True, skip_once=True)
     assert exc.value.exit_code == 1
@@ -429,7 +493,7 @@ def test_run_install_once_failure(tmp_path, monkeypatch):
         raise RuntimeError("cycle failed")
 
     monkeypatch.setattr("rain_bypass.install_cli.run", _fail)
-    prompter = FakePrompter(secrets=["key"], confirms=[True, True, False])
+    prompter = FakePrompter(secrets=["valid-key01"], confirms=[True, True, False])
     with pytest.raises(typer.Exit) as exc:
         run_install(tmp_path, prompter=prompter, skip_systemd=True)
     assert exc.value.exit_code == 1
@@ -466,7 +530,17 @@ def test_cli_bad_parameter(monkeypatch):
 
     monkeypatch.setattr("rain_bypass.install_cli.run_install", _bad)
     result = CliRunner().invoke(app, [])
-    assert result.exit_code != 0
+    assert result.exit_code == 1
+
+
+def test_cli_weather_error(monkeypatch):
+    def _weather(**kwargs):
+        raise WeatherError("visual crossing unauthorized; check api_key")
+
+    monkeypatch.setattr("rain_bypass.install_cli.run_install", _weather)
+    result = CliRunner().invoke(app, [])
+    assert result.exit_code == 1
+    assert "unauthorized" in result.output
 
 
 def test_cli_install(monkeypatch):

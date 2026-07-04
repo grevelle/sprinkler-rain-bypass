@@ -177,13 +177,13 @@ def _get_json(url: str, *, params: dict[str, str], timeout: int) -> dict[str, An
         status = exc.response.status_code
         logger.warning("weather request failed status=%s", status)
         if status == 401:
-            raise WeatherError("visual crossing unauthorized; check api_key") from exc
+            raise WeatherError("visual crossing unauthorized; check api_key") from None
         if status == 429:
-            raise WeatherError("visual crossing rate limit exceeded") from exc
-        raise WeatherError(f"visual crossing HTTP {status}") from exc
+            raise WeatherError("visual crossing rate limit exceeded") from None
+        raise WeatherError(f"visual crossing HTTP {status}") from None
     except httpx.HTTPError as exc:
         logger.warning("weather request failed")
-        raise WeatherError("visual crossing request failed") from exc
+        raise WeatherError("visual crossing request failed") from None
 
     try:
         payload = response.json()
