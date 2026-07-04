@@ -17,7 +17,7 @@ repos:
         name: shellcheck
         entry: shellcheck
         language: system
-        files: ^install\.sh$
+        files: ^(install|configure)\.sh$
       - id: check-lf
         name: check LF line endings
         entry: python scripts/check_lf.py

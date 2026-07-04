@@ -301,6 +301,14 @@ def test_ensure_state_writable_noop_when_missing(tmp_path: Path, monkeypatch):
     ensure_state_writable(tmp_path, settings, run_command=pytest.fail)
 
 
+def test_ensure_state_writable_noop_on_non_posix(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: False)
+    settings = load_example_settings(weather={"api_key": "k"})
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    ensure_state_writable(tmp_path, settings, run_command=pytest.fail)
+
+
 def test_ensure_state_writable_chowns_when_unwritable(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
     monkeypatch.setattr(
