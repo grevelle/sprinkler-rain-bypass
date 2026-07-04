@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import getpass
 import os
 import re
 import shutil
@@ -132,6 +133,37 @@ def write_settings_secure(path: Path, settings: Settings) -> None:
         os.chmod(path, 0o600)
 
 
+def resolve_state_path(install_root: Path, settings: Settings) -> Path:
+    state_path = settings.runtime.state_path
+    if state_path.is_absolute():
+        return state_path
+    return install_root / state_path
+
+
+def ensure_state_writable(
+    install_root: Path,
+    settings: Settings,
+    *,
+    run_command: RunCommand | None = None,
+) -> None:
+    if not _is_posix():
+        return
+    state_path = resolve_state_path(install_root, settings)
+    if not state_path.exists() or os.access(state_path, os.W_OK):
+        return
+    runner = run_command or subprocess.run
+    user = getpass.getuser()
+    typer.echo(
+        f"==> Fixing permissions on {state_path.name} "
+        "(systemd created it as root; installer runs as your user)"
+    )
+    if shutil.which("sudo") is None:
+        raise typer.Exit(
+            f"Cannot write {state_path}. Run: sudo chown {user} {state_path}"
+        )
+    runner(["sudo", "chown", f"{user}:{user}", str(state_path)], check=True)
+
+
 def install_systemd_unit(
     root: Path,
     python: Path,
@@ -224,6 +256,7 @@ def run_install(
         try:
             once_settings = load_settings(settings_path)
             configure_logging(once_settings.runtime.log_level)
+            ensure_state_writable(install_root, once_settings, run_command=run_command)
             run(once_settings, once=True)
         except Exception as exc:
             typer.secho(f"Control cycle failed: {exc}", fg=typer.colors.RED, err=True)

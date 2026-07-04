@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -14,11 +15,13 @@ from rain_bypass.install_cli import (
     TyperPrompter,
     app,
     build_settings,
+    ensure_state_writable,
     install_systemd_unit,
     main,
     prompt_settings,
     render_systemd_unit,
     repo_root,
+    resolve_state_path,
     run_install,
     validate_api_key,
     validate_zip_code,
@@ -79,6 +82,69 @@ def test_validate_zip_code():
     assert validate_zip_code(" 53029-1234 ") == "53029"
     with pytest.raises(typer.BadParameter, match="ZIP code"):
         validate_zip_code("bad")
+
+
+def test_resolve_state_path_relative(tmp_path: Path):
+    settings = load_example_settings(weather={"api_key": "k"})
+    assert resolve_state_path(tmp_path, settings) == tmp_path / "state.json"
+
+
+def test_resolve_state_path_absolute(tmp_path: Path):
+    absolute = tmp_path / "custom-state.json"
+    settings = load_example_settings(
+        weather={"api_key": "k"},
+        runtime={"state_path": str(absolute), "log_level": "INFO"},
+    )
+    assert resolve_state_path(tmp_path, settings) == absolute
+
+
+def test_ensure_state_writable_noop_when_missing(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
+    settings = load_example_settings(weather={"api_key": "k"})
+    ensure_state_writable(tmp_path, settings, run_command=pytest.fail)
+
+
+def test_ensure_state_writable_chowns_when_unwritable(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/sudo" if name == "sudo" else None,
+    )
+    settings = load_example_settings(weather={"api_key": "k"})
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> CompletedProcess[bytes]:
+        calls.append(cmd)
+        return CompletedProcess(cmd, 0)
+
+    real_access = os.access
+
+    def deny_write(path: os.PathLike[str] | str, mode: int) -> bool:
+        if mode == os.W_OK and Path(path) == state_path:
+            return False
+        return real_access(path, mode)
+
+    monkeypatch.setattr(os, "access", deny_write)
+    ensure_state_writable(tmp_path, settings, run_command=fake_run)
+    assert calls[0][0:2] == ["sudo", "chown"]
+    assert str(state_path) in calls[0][-1]
+
+
+def test_ensure_state_writable_exits_without_sudo(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_cli.shutil.which", lambda _name: None)
+    settings = load_example_settings(weather={"api_key": "k"})
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+
+    def deny_write(_path: os.PathLike[str] | str, mode: int) -> bool:
+        return mode != os.W_OK
+
+    monkeypatch.setattr(os, "access", deny_write)
+    with pytest.raises(typer.Exit):
+        ensure_state_writable(tmp_path, settings)
 
 
 def test_render_systemd_unit():
