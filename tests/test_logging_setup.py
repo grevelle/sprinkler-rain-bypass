@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import logging
 
-import pytest
-
 from rain_bypass.logging_setup import RedactSecretsFilter, configure_logging, redact_secrets
 
 
