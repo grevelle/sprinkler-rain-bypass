@@ -183,7 +183,7 @@ def _get_json(url: str, *, params: dict[str, str], timeout: int) -> dict[str, An
         raise WeatherError(f"visual crossing HTTP {status}") from exc
     except httpx.HTTPError as exc:
         logger.warning("weather request failed")
-        raise WeatherError(str(exc)) from exc
+        raise WeatherError("visual crossing request failed") from exc
 
     try:
         payload = response.json()

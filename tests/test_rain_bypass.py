@@ -581,7 +581,7 @@ def test_fetch_weather_connection_error(settings, monkeypatch):
     api_start, api_end = timeline_window(settings)
     url = timeline_url_for(settings, api_start, api_end)
     respx.get(url).mock(side_effect=httpx.ConnectError("down"))
-    with pytest.raises(WeatherError, match="down"):
+    with pytest.raises(WeatherError, match="visual crossing request failed"):
         fetch_weather(settings)
 
 

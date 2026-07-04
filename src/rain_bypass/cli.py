@@ -8,6 +8,7 @@ import typer
 
 from rain_bypass.config import load_settings
 from rain_bypass.controller import run
+from rain_bypass.logging_setup import configure_logging
 
 app = typer.Typer(
     add_completion=False,
@@ -15,13 +16,6 @@ app = typer.Typer(
     pretty_exceptions_show_locals=False,
     help="Sprinkler rain bypass controller",
 )
-
-
-def configure_logging(level: str) -> None:
-    logging.basicConfig(
-        level=getattr(logging, level, logging.INFO),
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
 
 
 @app.callback(invoke_without_command=True)

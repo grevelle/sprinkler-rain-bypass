@@ -13,6 +13,7 @@ import typer
 
 from rain_bypass.config import Settings, load_settings
 from rain_bypass.controller import run
+from rain_bypass.logging_setup import configure_logging
 from rain_bypass.platform import is_pi_zero, is_raspberry_pi
 from rain_bypass.settings_io import load_example_settings, write_settings
 from rain_bypass.weather import resolve_location, weather_api_smoke
@@ -221,7 +222,9 @@ def run_install(
     if not skip_once and prompts.confirm("Run a live --once cycle now?", default=True):
         typer.echo("==> Running one control cycle (--once)")
         try:
-            run(load_settings(settings_path), once=True)
+            once_settings = load_settings(settings_path)
+            configure_logging(once_settings.runtime.log_level)
+            run(once_settings, once=True)
         except Exception as exc:
             typer.secho(f"Control cycle failed: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(1) from exc
