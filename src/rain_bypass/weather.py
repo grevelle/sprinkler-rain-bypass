@@ -181,7 +181,7 @@ def _get_json(url: str, *, params: dict[str, str], timeout: int) -> dict[str, An
         if status == 429:
             raise WeatherError("visual crossing rate limit exceeded") from None
         raise WeatherError(f"visual crossing HTTP {status}") from None
-    except httpx.HTTPError as exc:
+    except httpx.HTTPError:
         logger.warning("weather request failed")
         raise WeatherError("visual crossing request failed") from None
 

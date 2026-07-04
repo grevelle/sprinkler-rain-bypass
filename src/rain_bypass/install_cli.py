@@ -194,7 +194,12 @@ def ensure_state_writable(
         "(systemd created it as root; installer runs as your user)"
     )
     if shutil.which("sudo") is None:
-        raise typer.Exit(f"Cannot write {state_path}. Run: sudo chown {user} {state_path}")
+        typer.secho(
+            f"Cannot write {state_path}. Run: sudo chown {user} {state_path}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
     runner(["sudo", "chown", f"{user}:{user}", str(state_path)], check=True)
 
 

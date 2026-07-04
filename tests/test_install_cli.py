@@ -10,6 +10,7 @@ import typer
 from typer.testing import CliRunner
 
 from rain_bypass.config import Location, load_settings
+from rain_bypass.exceptions import WeatherError
 from rain_bypass.install_cli import (
     SERVICE_NAME,
     TyperPrompter,
@@ -32,7 +33,6 @@ from rain_bypass.install_cli import (
     write_and_validate_settings,
     write_settings_secure,
 )
-from rain_bypass.exceptions import WeatherError
 from rain_bypass.settings_io import load_example_settings
 
 
@@ -190,7 +190,10 @@ def test_restart_service_if_installed_declined(monkeypatch):
 def test_run_configure_writes_settings(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
-    monkeypatch.setattr("rain_bypass.install_cli.restart_service_if_installed", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.restart_service_if_installed",
+        lambda **_kwargs: None,
+    )
     prompter = FakePrompter(secrets=["live-key-001"])
     run_configure(tmp_path, prompter=prompter, skip_service_restart=True)
     settings_path = tmp_path / "settings.toml"
@@ -200,7 +203,10 @@ def test_run_configure_writes_settings(tmp_path: Path, monkeypatch):
 def test_run_configure_keeps_existing_key(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
-    monkeypatch.setattr("rain_bypass.install_cli.restart_service_if_installed", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.restart_service_if_installed",
+        lambda **_kwargs: None,
+    )
     settings_path = tmp_path / "settings.toml"
     write_settings_secure(
         settings_path,
@@ -218,7 +224,10 @@ def test_run_configure_skips_api_test(tmp_path: Path, monkeypatch):
         raise RuntimeError("should not run")
 
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", _boom)
-    monkeypatch.setattr("rain_bypass.install_cli.restart_service_if_installed", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.restart_service_if_installed",
+        lambda **_kwargs: None,
+    )
     prompter = FakePrompter(secrets=["live-key-001"])
     run_configure(
         tmp_path,
