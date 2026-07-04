@@ -26,6 +26,20 @@ cp settings.example.toml settings.toml   # edit api_key (and zip_code if not 530
 
 `settings.example.toml` is the canonical default config. Tests and `rain_bypass.settings_io` derive settings from it. Run `./install.sh` (or `rain-bypass-install`) for the interactive setup wizard.
 
+**Change API key or ZIP later** (skips apt/pip — usually seconds):
+
+```bash
+chmod +x configure.sh   # once
+./configure.sh
+```
+
+For other options (`check_hour`, `inches_per_cycle`, GPIO pins, etc.), edit `settings.toml` directly and restart the service:
+
+```bash
+nano settings.toml
+sudo systemctl restart rain-bypass
+```
+
 ### Pi Zero W notes
 
 | Topic | Recommendation |

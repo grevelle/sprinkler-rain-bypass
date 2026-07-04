@@ -17,14 +17,19 @@ from rain_bypass.install_cli import (
     build_settings,
     ensure_state_writable,
     install_systemd_unit,
+    load_existing_settings_fields,
     main,
     prompt_settings,
     render_systemd_unit,
     repo_root,
     resolve_state_path,
+    restart_service_if_installed,
+    run_api_test,
+    run_configure,
     run_install,
     validate_api_key,
     validate_zip_code,
+    write_and_validate_settings,
     write_settings_secure,
 )
 from rain_bypass.exceptions import WeatherError
@@ -68,6 +73,186 @@ class FakePrompter:
         if self.secrets:
             return self.secrets.pop(0)
         return "test-key-001"
+
+
+def test_load_existing_settings_fields_missing(tmp_path: Path):
+    assert load_existing_settings_fields(tmp_path / "settings.toml") == (None, "53029")
+
+
+def test_load_existing_settings_fields_ok(tmp_path: Path):
+    path = tmp_path / "settings.toml"
+    write_settings_secure(path, load_example_settings(weather={"api_key": "existing-key1"}))
+    key, zip_code = load_existing_settings_fields(path)
+    assert key == "existing-key1"
+    assert zip_code == "53029"
+
+
+def test_load_existing_settings_fields_invalid(tmp_path: Path):
+    path = tmp_path / "settings.toml"
+    path.write_text("not valid toml", encoding="utf-8")
+    assert load_existing_settings_fields(path) == (None, "53029")
+
+
+def test_write_and_validate_settings(tmp_path: Path):
+    path = tmp_path / "settings.toml"
+    settings = load_example_settings(weather={"api_key": "write-test01"})
+    write_and_validate_settings(path, settings)
+    assert load_settings(path).weather.api_key == "write-test01"
+
+
+def test_run_api_test_success(tmp_path: Path, monkeypatch):
+    path = tmp_path / "settings.toml"
+    write_settings_secure(path, load_example_settings(weather={"api_key": "smoke-key01"}))
+    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    run_api_test(path)
+
+
+def test_run_api_test_failure(tmp_path: Path, monkeypatch):
+    path = tmp_path / "settings.toml"
+    write_settings_secure(path, load_example_settings(weather={"api_key": "smoke-key01"}))
+
+    def _boom(_settings):
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", _boom)
+    with pytest.raises(typer.Exit) as exc:
+        run_api_test(path)
+    assert exc.value.exit_code == 1
+
+
+def test_restart_service_if_installed_skips_without_systemctl(monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.shutil.which", lambda _name: None)
+    restart_service_if_installed()
+
+
+def test_restart_service_if_installed_skips_without_unit(monkeypatch):
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    restart_service_if_installed()
+
+
+def test_restart_service_if_installed_restarts(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> CompletedProcess[bytes]:
+        calls.append(cmd)
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    unit = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
+    original_is_file = Path.is_file
+
+    def is_file(self: Path) -> bool:
+        if self == unit:
+            return True
+        return original_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    restart_service_if_installed(
+        prompter=FakePrompter(confirms=[True]),
+        run_command=fake_run,
+    )
+    assert calls == [["sudo", "systemctl", "restart", SERVICE_NAME]]
+
+
+def test_restart_service_if_installed_declined(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> CompletedProcess[bytes]:
+        calls.append(cmd)
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    unit = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
+    original_is_file = Path.is_file
+
+    def is_file(self: Path) -> bool:
+        if self == unit:
+            return True
+        return original_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    restart_service_if_installed(
+        prompter=FakePrompter(confirms=[False]),
+        run_command=fake_run,
+    )
+    assert calls == []
+
+
+def test_run_configure_writes_settings(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    monkeypatch.setattr("rain_bypass.install_cli.restart_service_if_installed", lambda **_kwargs: None)
+    prompter = FakePrompter(secrets=["live-key-001"])
+    run_configure(tmp_path, prompter=prompter, skip_service_restart=True)
+    settings_path = tmp_path / "settings.toml"
+    assert load_settings(settings_path).weather.api_key == "live-key-001"
+
+
+def test_run_configure_keeps_existing_key(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    monkeypatch.setattr("rain_bypass.install_cli.restart_service_if_installed", lambda **_kwargs: None)
+    settings_path = tmp_path / "settings.toml"
+    write_settings_secure(
+        settings_path,
+        load_example_settings(weather={"api_key": "existing-key1"}),
+    )
+    prompter = FakePrompter(confirms=[True])
+    run_configure(tmp_path, prompter=prompter, skip_service_restart=True)
+    assert load_settings(settings_path).weather.api_key == "existing-key1"
+
+
+def test_run_configure_skips_api_test(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+
+    def _boom(_settings):
+        raise RuntimeError("should not run")
+
+    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", _boom)
+    monkeypatch.setattr("rain_bypass.install_cli.restart_service_if_installed", lambda **_kwargs: None)
+    prompter = FakePrompter(secrets=["live-key-001"])
+    run_configure(
+        tmp_path,
+        prompter=prompter,
+        skip_api_test=True,
+        skip_service_restart=True,
+    )
+
+
+def test_restart_service_if_installed_skip_flag(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> CompletedProcess[bytes]:
+        calls.append(cmd)
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    restart_service_if_installed(run_command=fake_run, skip=True)
+    assert calls == []
+
+
+def test_cli_configure(monkeypatch):
+    called: dict[str, bool] = {}
+
+    def fake_configure(**kwargs):
+        called.update(kwargs)
+
+    monkeypatch.setattr("rain_bypass.install_cli.run_configure", fake_configure)
+    result = CliRunner().invoke(app, ["configure", "--skip-api-test", "--no-restart"])
+    assert result.exit_code == 0
+    assert called == {"skip_api_test": True, "skip_service_restart": True}
 
 
 def test_validate_api_key():

@@ -8,7 +8,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Annotated, Protocol
 
 import typer
 
@@ -116,11 +116,22 @@ def build_settings(
     )
 
 
+def load_existing_settings_fields(settings_path: Path) -> tuple[str | None, str]:
+    if not settings_path.is_file():
+        return None, "53029"
+    try:
+        existing = load_settings(settings_path)
+        return existing.weather.api_key, existing.location.zip_code
+    except Exception:
+        return None, "53029"
+
+
 def prompt_settings(
     _base: Settings,
     prompter: Prompter,
     *,
     existing_key: str | None = None,
+    default_zip: str = "53029",
 ) -> Settings:
     typer.echo(
         "\n==> Defaults from settings.example.toml "
@@ -134,7 +145,7 @@ def prompt_settings(
             api_key = existing_key
         else:
             api_key = prompter.secret("Visual Crossing API key")
-        zip_code = prompter.text("ZIP code", default="53029")
+        zip_code = prompter.text("ZIP code", default=default_zip)
         if not is_raspberry_pi():
             typer.secho(
                 "warning: Raspberry Pi not detected; gpio.mock=true for this machine.",
@@ -185,6 +196,86 @@ def ensure_state_writable(
     if shutil.which("sudo") is None:
         raise typer.Exit(f"Cannot write {state_path}. Run: sudo chown {user} {state_path}")
     runner(["sudo", "chown", f"{user}:{user}", str(state_path)], check=True)
+
+
+def write_and_validate_settings(settings_path: Path, settings: Settings) -> None:
+    write_settings_secure(settings_path, settings)
+    typer.echo(f"==> Wrote {settings_path}")
+    typer.echo("==> Validating settings.toml")
+    load_settings(settings_path)
+
+
+def run_api_test(settings_path: Path) -> None:
+    typer.echo("==> Testing Visual Crossing API (one fetch)")
+    try:
+        message = weather_api_smoke(load_settings(settings_path))
+    except Exception as exc:
+        typer.secho(f"API test failed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    typer.echo(message)
+
+
+def restart_service_if_installed(
+    *,
+    prompter: Prompter | None = None,
+    run_command: RunCommand | None = None,
+    skip: bool = False,
+) -> None:
+    if skip or shutil.which("systemctl") is None:
+        return
+    unit_path = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
+    if not unit_path.is_file():
+        return
+    prompts = prompter or TyperPrompter()
+    if not prompts.confirm(f"Restart {SERVICE_NAME} service to apply changes?", default=True):
+        return
+    runner = run_command or subprocess.run
+    typer.echo(f"==> Restarting {SERVICE_NAME} (requires sudo)")
+    runner(["sudo", "systemctl", "restart", SERVICE_NAME], check=True)
+    typer.echo(f"==> Service restarted. Status: sudo systemctl status {SERVICE_NAME}")
+
+
+def run_configure(
+    root: Path | None = None,
+    *,
+    prompter: Prompter | None = None,
+    skip_api_test: bool = False,
+    skip_service_restart: bool = False,
+    run_command: RunCommand | None = None,
+) -> None:
+    install_root = root or repo_root()
+    settings_path = install_root / "settings.toml"
+    prompts = prompter or TyperPrompter()
+    defaults = load_example_settings()
+
+    typer.echo("Sprinkler Rain Bypass — configure")
+    typer.echo(f"Install directory: {install_root}")
+    typer.echo(
+        "Updates settings.toml only (no pip install). "
+        "For other options, edit settings.toml directly.\n"
+    )
+
+    existing_key, default_zip = load_existing_settings_fields(settings_path)
+    settings = prompt_settings(
+        defaults,
+        prompts,
+        existing_key=existing_key,
+        default_zip=default_zip,
+    )
+    write_and_validate_settings(settings_path, settings)
+
+    if not skip_api_test:
+        run_api_test(settings_path)
+
+    restart_service_if_installed(
+        prompter=prompts,
+        run_command=run_command,
+        skip=skip_service_restart,
+    )
+
+    typer.echo("\n==> Done.")
+    typer.echo(f"  Config:  {settings_path}")
+    typer.echo("  Other settings: nano settings.toml (then restart the service)")
 
 
 def install_systemd_unit(
@@ -251,14 +342,14 @@ def run_install(
             fg=typer.colors.YELLOW,
         )
 
-    existing_key: str | None = None
-    if settings_path.is_file():
-        try:
-            existing_key = load_settings(settings_path).weather.api_key
-        except Exception:
-            existing_key = None
+    existing_key, default_zip = load_existing_settings_fields(settings_path)
 
-    settings = prompt_settings(defaults, prompts, existing_key=existing_key)
+    settings = prompt_settings(
+        defaults,
+        prompts,
+        existing_key=existing_key,
+        default_zip=default_zip,
+    )
 
     if settings_path.is_file() and not prompts.confirm(
         "settings.toml already exists. Overwrite?", default=True
@@ -266,20 +357,10 @@ def run_install(
         typer.secho("Aborted; existing settings.toml kept.", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    write_settings_secure(settings_path, settings)
-
-    typer.echo(f"==> Wrote {settings_path}")
-    typer.echo("==> Validating settings.toml")
-    load_settings(settings_path)
+    write_and_validate_settings(settings_path, settings)
 
     if not skip_api_test:
-        typer.echo("==> Testing Visual Crossing API (one fetch)")
-        try:
-            message = weather_api_smoke(load_settings(settings_path))
-        except Exception as exc:
-            typer.secho(f"API test failed: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(1) from None
-        typer.echo(message)
+        run_api_test(settings_path)
 
     if not skip_once and prompts.confirm("Run a live --once cycle now?", default=True):
         typer.echo("==> Running one control cycle (--once)")
@@ -303,6 +384,7 @@ def run_install(
         "[balance].inches_per_cycle after a catch-cup test."
     )
     typer.echo(f"  Config:  {settings_path}")
+    typer.echo(f"  Reconfigure: {install_root / 'configure.sh'}")
     typer.echo(f"  Manual:  {python} -m rain_bypass --once")
     typer.echo(f"  Loop:    {python} -m rain_bypass")
     unit_path = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
@@ -310,10 +392,9 @@ def run_install(
         typer.echo(f"  Service: sudo systemctl status {SERVICE_NAME}")
 
 
-@app.callback(invoke_without_command=True)
-def install() -> None:
+def _handle_cli_errors(fn: Callable[[], None]) -> None:
     try:
-        run_install()
+        fn()
     except typer.Exit:
         raise
     except typer.BadParameter as exc:
@@ -325,6 +406,32 @@ def install() -> None:
     except KeyboardInterrupt:
         typer.echo("\nAborted.", err=True)
         raise typer.Exit(130) from None
+
+
+@app.callback(invoke_without_command=True)
+def install(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        _handle_cli_errors(run_install)
+
+
+@app.command("configure")
+def configure(
+    skip_api_test: Annotated[
+        bool,
+        typer.Option("--skip-api-test", help="Skip the Visual Crossing smoke test."),
+    ] = False,
+    skip_service_restart: Annotated[
+        bool,
+        typer.Option("--no-restart", help="Do not restart the systemd service."),
+    ] = False,
+) -> None:
+    """Update API key and ZIP without reinstalling dependencies."""
+    _handle_cli_errors(
+        lambda: run_configure(
+            skip_api_test=skip_api_test,
+            skip_service_restart=skip_service_restart,
+        )
+    )
 
 
 def main() -> None:
