@@ -74,8 +74,8 @@ def test_load_settings(settings):
     assert settings.balance.forecast_days == 2
     assert settings.watering.event_lookback_days == 3
     assert settings.watering.event_inches == pytest.approx(0.25)
-    assert settings.watering.check_hour == 4
-    assert settings.watering.check_minute == 30
+    assert settings.watering.check_hour == 0
+    assert settings.watering.check_minute == 0
     assert settings.runtime.fail_mode is FailMode.DISABLE_WATERING
     assert settings.weather.api_key == "test-key"
 
@@ -161,12 +161,25 @@ def test_freeze_block(settings):
 
 def test_seconds_until_next_check(settings):
     tz = ZoneInfo("America/Chicago")
+    late_night = datetime(2024, 6, 9, 23, 0, tzinfo=tz)
+    assert seconds_until_next_check(settings, now=late_night) == pytest.approx(3600)
     before = datetime(2024, 6, 10, 3, 0, tzinfo=tz)
-    assert seconds_until_next_check(settings, now=before) == pytest.approx(90 * 60)
+    assert seconds_until_next_check(settings, now=before) == pytest.approx(21 * 3600)
     after = datetime(2024, 6, 10, 5, 0, tzinfo=tz)
-    assert seconds_until_next_check(settings, now=after) == pytest.approx(23.5 * 3600)
+    assert seconds_until_next_check(settings, now=after) == pytest.approx(19 * 3600)
     naive = datetime(2024, 6, 10, 3, 0)
-    assert seconds_until_next_check(settings, now=naive) == pytest.approx(90 * 60)
+    assert seconds_until_next_check(settings, now=naive) == pytest.approx(21 * 3600)
+
+
+def test_seconds_until_next_check_before_check_time_same_day(settings):
+    tz = ZoneInfo("America/Chicago")
+    morning = settings.model_copy(
+        update={
+            "watering": settings.watering.model_copy(update={"check_hour": 4, "check_minute": 30})
+        }
+    )
+    before = datetime(2024, 6, 10, 3, 0, tzinfo=tz)
+    assert seconds_until_next_check(morning, now=before) == pytest.approx(90 * 60)
 
 
 def test_max_daily_precip():

@@ -34,8 +34,8 @@ app = typer.Typer(
 class PromptDefaults:
     zip_code: str = "53029"
     inches_per_cycle: float = 0.3
-    check_hour: int = 4
-    check_minute: int = 30
+    check_hour: int = 0
+    check_minute: int = 0
 
 
 class Prompter(Protocol):
@@ -114,7 +114,7 @@ def validate_check_time(value: str) -> tuple[int, int]:
     text = value.strip()
     match = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
     if not match:
-        raise typer.BadParameter("Check time must be HH:MM in 24-hour format (e.g. 04:30).")
+        raise typer.BadParameter("Check time must be HH:MM in 24-hour format (e.g. 00:00).")
     hour = int(match.group(1))
     minute = int(match.group(2))
     if hour > 23 or minute > 59:
@@ -180,8 +180,8 @@ def build_settings(
     *,
     base: Settings | None = None,
     inches_per_cycle: float = 0.3,
-    check_hour: int = 4,
-    check_minute: int = 30,
+    check_hour: int = 0,
+    check_minute: int = 0,
     gpio_mock: bool | None = None,
 ) -> Settings:
     key = validate_api_key(api_key)
@@ -441,7 +441,7 @@ def run_install(
     typer.echo("Sprinkler Rain Bypass — installer")
     typer.echo(f"Install directory: {install_root}")
     typer.echo(
-        "Press Enter for defaults except your API key (ZIP 53029, 0.3 in/cycle, 4:30 AM check).\n"
+        "Press Enter for defaults except your API key (ZIP 53029, 0.3 in/cycle, midnight check).\n"
     )
     if is_pi_zero():
         typer.secho(

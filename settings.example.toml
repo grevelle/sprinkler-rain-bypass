@@ -10,9 +10,9 @@ timezone = "America/Chicago"
 inches_per_cycle = 0.3
 
 [watering]
-# Daily check before typical morning irrigation (Rain Bird daily program).
-check_hour = 4
-check_minute = 30
+# Daily check before irrigation (Rain Bird program at 1:00 AM — check at midnight).
+check_hour = 0
+check_minute = 0
 
 [sewer]
 # Hartland/Waukesha: annual sewer usage is set from Jan 16–Mar 15 water use (April bill).

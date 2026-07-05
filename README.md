@@ -58,7 +58,7 @@ On boot the relay **blocks watering** until the first check completes, then appl
 
 ## Usage
 
-Once installed, the Pi runs as a **systemd service** (`rain-bypass`). You usually leave it alone — it wakes at the configured check time (default **4:30 AM** local), fetches weather, decides ON or OFF for that day’s irrigation cycle, and sets the relay. Rain Bird (or your controller) runs its daily program as usual; the bypass relay acts like a rain sensor.
+Once installed, the Pi runs as a **systemd service** (`rain-bypass`). You usually leave it alone — it wakes at the configured check time (default **midnight** local), fetches weather, decides ON or OFF for that day’s irrigation cycle, and sets the relay. Rain Bird (or your controller) runs its daily program as usual; the bypass relay acts like a rain sensor.
 
 ### Check status (text dashboard)
 
@@ -116,7 +116,7 @@ cd ~/sprinkler-rain-bypass
 .venv/bin/python -m rain_bypass --once
 ```
 
-Use this after changing settings to verify behavior without waiting until 4:30 AM.
+Use this after changing settings to verify behavior without waiting for the next scheduled check.
 
 ### Change settings
 
@@ -180,7 +180,7 @@ Use `gpio.mock = true` in settings to develop without a Pi.
 1. Set **one program** with your zones and run times.
 2. Schedule the program **every day** at your preferred morning time.
 3. Wire the bypass relay to the rain-sensor terminals (COM/NO as a dry contact).
-4. The Pi check runs at **4:30 AM** by default so the relay state is set **before** the morning cycle.
+4. Set the Pi check **before** your program (default **midnight** for a **1:00 AM** cycle).
 5. **Calibrate `[balance].inches_per_cycle`** once with a catch-cup test on a full program run.
 
 Relay **open** (green LED) = dry sensor = watering **allowed**. Relay **closed** (red LED) = wet sensor = cycle **skipped**.
@@ -207,7 +207,7 @@ watering_required = balance_ok AND safety_ok AND NOT sewer
 
 There is **no weekly schedule** — each day recomputes one ON/OFF for the next cycle only. One [Visual Crossing Timeline API](https://www.visualcrossing.com/resources/documentation/weather-api/timeline-weather-api/) request returns daily rows; `precip` is summed in **inches** (`unitGroup=us`).
 
-**Check timing:** The loop sleeps until the next `check_hour`:`check_minute` in `location.timezone` (default **4:30 AM**).
+**Check timing:** The loop sleeps until the next `check_hour`:`check_minute` in `location.timezone` (default **00:00** / midnight).
 
 - Forecast rain reduces today’s balance before it falls (conservative). Tune `[balance].forecast_days` if the switch stays OFF too often.
 - When the switch is **ON**, the model credits one `inches_per_cycle` to the month (it does not verify the panel actually ran).

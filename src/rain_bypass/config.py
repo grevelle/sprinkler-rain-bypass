@@ -91,8 +91,8 @@ class Balance(FrozenModel):
 
 
 class Watering(FrozenModel):
-    check_hour: int = Field(default=4, ge=0, le=23)
-    check_minute: int = Field(default=30, ge=0, le=59)
+    check_hour: int = Field(default=0, ge=0, le=23)
+    check_minute: int = Field(default=0, ge=0, le=59)
     event_lookback_days: int = Field(default=3, ge=1)
     event_inches: float = Field(default=0.25, ge=0)
     freeze_temp_f: float = Field(default=32)

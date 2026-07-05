@@ -478,7 +478,7 @@ def test_prompt_settings_builds_toml(tmp_path, monkeypatch):
     assert prompter.text_calls == [
         ("ZIP code", "53029"),
         ("Inches per cycle (30 min/zone ≈ 0.3)", "0.3"),
-        ("Daily check time before irrigation (HH:MM, 24h)", "04:30"),
+        ("Daily check time before irrigation (HH:MM, 24h)", "00:00"),
     ]
 
 
@@ -563,14 +563,14 @@ def test_build_settings_uses_example_defaults(monkeypatch):
         "my-test-key1",
         "53029",
         inches_per_cycle=0.3,
-        check_hour=4,
-        check_minute=30,
+        check_hour=0,
+        check_minute=0,
     )
     assert settings.weather.api_key == "my-test-key1"
     assert settings.location.zip_code == "53029"
     assert settings.gpio.mock is False
     assert settings.balance.inches_per_cycle == pytest.approx(0.3)
-    assert settings.watering.check_hour == 4
+    assert settings.watering.check_hour == 0
 
 
 def test_build_settings_mock_gpio_off_pi(monkeypatch):
