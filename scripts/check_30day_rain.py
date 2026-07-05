@@ -1,11 +1,17 @@
 """One-off: verify Visual Crossing returns 30 days of daily precip."""
+
 from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
 
 from rain_bypass.config import load_settings
-from rain_bypass.weather import daily_precip_values, sum_precip, timeline_url_for, _get_timeline, timeline_params
+from rain_bypass.weather import (
+    _get_timeline,
+    daily_precip_values,
+    sum_precip,
+    timeline_url_for,
+)
 
 
 def main() -> None:

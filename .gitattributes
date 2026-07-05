@@ -16,4 +16,5 @@
 
 # Shell entrypoints (LF + executable in git).
 install.sh text eol=lf
+configure.sh text eol=lf
 scripts/ci.sh text eol=lf

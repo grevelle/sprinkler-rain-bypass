@@ -20,10 +20,15 @@ Equivalent manual steps:
 ```bash
 pip install --upgrade pip
 pip install --upgrade -e ".[dev]"
-pre-commit run --all-files
+ruff check .
+ruff format --check .
+shellcheck install.sh configure.sh
+python scripts/check_lf.py
 pyright
 pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100
 ```
+
+CI uses **check-only** Ruff (`ruff check`, `ruff format --check`) so a push cannot pass locally while GitHub fails because pre-commit auto-fixed files in the runner. Run `ruff check --fix && ruff format` before commit, or use pre-commit hooks locally (`pre-commit install`).
 
 ## Required workflow
 

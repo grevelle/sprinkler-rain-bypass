@@ -16,6 +16,10 @@ jobs:
           check-latest: true
       - run: pip install --upgrade pip
       - run: pip install --upgrade -e ".[dev]"
-      - run: pre-commit run --all-files
+      # Non-mutating lint (pre-commit --fix modifies files and fails CI if anything was dirty).
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: shellcheck install.sh configure.sh
+      - run: python scripts/check_lf.py
       - run: pyright
       - run: pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100 --tb=short
