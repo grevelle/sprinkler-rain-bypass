@@ -8,7 +8,7 @@ Get a free API key at [Visual Crossing](https://www.visualcrossing.com/weather-a
 
 ## Setup
 
-On a **Raspberry Pi Zero W**, use the **latest Raspberry Pi OS** (32-bit is fine). Run the interactive installer — it checks for missing apt packages (venv, git, build tools on the Pi), applies defaults from `settings.example.toml`, resolves your **ZIP code** to coordinates (default **53029**), and only requires your Visual Crossing **API key** (press Enter everywhere else):
+On a **Raspberry Pi Zero W**, use the **latest Raspberry Pi OS** (32-bit is fine). Run the interactive installer — it checks for missing apt packages (venv, git, build tools on the Pi), applies defaults from `settings.example.toml`, resolves your **ZIP code** to coordinates (default **53029**), and only requires your Visual Crossing **API key** (press Enter everywhere else). Full command list: [Command reference](#command-reference).
 
 ```bash
 git clone https://github.com/grevelle/sprinkler-rain-bypass.git
@@ -26,21 +26,7 @@ cp settings.example.toml settings.toml   # edit api_key (and zip_code if not 530
 
 `settings.example.toml` is the canonical default config. Tests and `rain_bypass.settings_io` derive settings from it. Run `./install.sh` (or `rain-bypass-install`) for the interactive setup wizard.
 
-**Change API key, ZIP, inches per cycle, or check time** (skips apt/pip — usually seconds):
-
-```bash
-chmod +x configure.sh   # once
-./configure.sh
-```
-
-Prompts update location (ZIP lookup), `inches_per_cycle`, and daily check time. **Other settings** (sewer window, GPIO, monthly balance overrides) are preserved and left unchanged.
-
-For options not in the wizard, edit `settings.toml` directly and restart the service:
-
-```bash
-nano settings.toml
-sudo systemctl restart rain-bypass
-```
+**Change API key, ZIP, inches per cycle, or check time** — `./configure.sh` (see [Configure](#configure-api-key-zip-inchescycle-check-time)).
 
 ### Pi Zero W notes
 
@@ -56,26 +42,183 @@ sudo systemctl restart rain-bypass
 
 On boot the relay **blocks watering** until the first check completes, then applies the decision from the daily check.
 
-## Usage
+## Command reference
 
-Once installed, the Pi runs as a **systemd service** (`rain-bypass`). You usually leave it alone — it wakes at the configured check time (default **midnight** local), fetches weather, decides ON or OFF for that day’s irrigation cycle, and sets the relay. Rain Bird (or your controller) runs its daily program as usual; the bypass relay acts like a rain sensor.
+**On the Pi, `cd` into the repo first** — the venv and `settings.toml` live in `~/sprinkler-rain-bypass`, not your home directory:
 
-### Check status (text dashboard)
+```bash
+cd ~/sprinkler-rain-bypass
+```
 
-Any time you want to see what the system thinks:
+Then use `.venv/bin/python -m rain_bypass …` or activate the venv so `rain-bypass` is on your PATH:
+
+```bash
+source .venv/bin/activate
+rain-bypass status
+```
+
+Below, Pi examples use `cd ~/sprinkler-rain-bypass` where needed. Off-Pi dev commands assume you are already in the cloned repo.
+
+### First-time setup
+
+```bash
+git clone https://github.com/grevelle/sprinkler-rain-bypass.git
+cd sprinkler-rain-bypass
+chmod +x install.sh configure.sh
+./install.sh
+```
+
+Manual / dev setup (off the Pi or without the shell wrappers):
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e ".[gpio]"          # Pi
+pip install -e ".[dev,gpio]"                # dev machine
+cp settings.example.toml settings.toml
+.venv/bin/python -m rain_bypass.install_cli  # same wizard as ./install.sh
+```
+
+### Configure (API key, ZIP, inches/cycle, check time)
+
+```bash
+cd ~/sprinkler-rain-bypass
+./configure.sh
+# or:
+.venv/bin/python -m rain_bypass.install_cli configure
+.venv/bin/rain-bypass-install configure
+
+# flags:
+./configure.sh --skip-api-test              # skip Visual Crossing smoke test
+./configure.sh --no-restart                 # write settings.toml only
+```
+
+Prompts update location (ZIP lookup), `inches_per_cycle`, and daily check time. **Other settings** (sewer window, GPIO, monthly balance overrides) are preserved.
+
+Edit settings the wizard does not cover, then restart:
+
+```bash
+nano settings.toml
+sudo systemctl restart rain-bypass
+```
+
+### Run the controller
+
+```bash
+cd ~/sprinkler-rain-bypass
+
+# Continuous loop (what systemd runs):
+.venv/bin/python -m rain_bypass
+# or after: source .venv/bin/activate
+rain-bypass
+
+# One cycle — weather + decision + relay, then exit:
+.venv/bin/python -m rain_bypass --once
+rain-bypass --once
+
+# Alternate config file:
+.venv/bin/rain-bypass -c /path/to/settings.toml --once
+```
+
+Off-Pi development — set `gpio.mock = true` in `settings.toml`:
+
+```bash
+python -m rain_bypass --once
+python -m rain_bypass
+```
+
+### Status dashboard
+
+Read-only; never changes the relay or GPIO.
 
 ```bash
 cd ~/sprinkler-rain-bypass
 .venv/bin/python -m rain_bypass status
+
+# Saved state only — no live API call:
+.venv/bin/python -m rain_bypass status --cached
+
+# Same after activating the venv:
+source .venv/bin/activate
+rain-bypass status --cached
 ```
 
-Same command if you installed the console script: `rain-bypass status`.
-
-**Offline / no API call** — uses saved values from the last check only:
+### Logs
 
 ```bash
-.venv/bin/python -m rain_bypass status --cached
+sudo journalctl -u rain-bypass -f              # follow live
+sudo journalctl -u rain-bypass --since today
+sudo journalctl -u rain-bypass --since "1 hour ago"
 ```
+
+Set `log_level = "DEBUG"` in `settings.toml`, then `sudo systemctl restart rain-bypass`.
+
+### systemd service
+
+Installed by `./install.sh` as `rain-bypass`.
+
+```bash
+sudo systemctl status rain-bypass
+sudo systemctl restart rain-bypass
+sudo systemctl stop rain-bypass       # relay stays at last state
+sudo systemctl start rain-bypass
+sudo systemctl enable rain-bypass     # start on boot (install.sh does this)
+```
+
+Manual unit install (substitute paths first — see [systemd](#systemd) below):
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now rain-bypass
+```
+
+### Update from GitHub (Pi)
+
+```bash
+cd ~/sprinkler-rain-bypass
+git pull
+.venv/bin/pip install -e '.[gpio]'
+sudo systemctl restart rain-bypass
+.venv/bin/python -m rain_bypass status    # optional sanity check
+```
+
+### Development & CI
+
+```bash
+pip install -e ".[dev,gpio]"
+pre-commit install                        # commit: Ruff + ShellCheck; push: Pyright + pytest
+
+# Full CI locally (mirrors GitHub Actions):
+./scripts/ci.sh                           # Linux / macOS / Pi
+.\scripts\ci.ps1                          # Windows PowerShell
+
+# Individual checks:
+ruff check .
+ruff check --fix .
+ruff format .
+ruff format --check .
+shellcheck install.sh configure.sh
+python scripts/check_lf.py
+pyright
+pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100
+pre-commit run --all-files
+```
+
+Live weather smoke test (needs real `settings.toml` with API key):
+
+```bash
+pytest -q -m live
+python scripts/check_30day_rain.py        # print 30-day daily precip from Visual Crossing
+```
+
+## Usage
+
+Once installed, the Pi runs as a **systemd service** (`rain-bypass`). You usually leave it alone — it wakes at the configured check time (default **midnight** local), fetches weather, decides ON or OFF for that day’s irrigation cycle, and sets the relay. Rain Bird (or your controller) runs its daily program as usual; the bypass relay acts like a rain sensor.
+
+See [Command reference](#command-reference) for every shell command.
+
+### Check status (text dashboard)
+
+Any time you want to see what the system thinks, run `rain-bypass status` (or `status --cached` for offline).
 
 Example output and how to read it:
 
@@ -100,23 +243,11 @@ Example output and how to read it:
 
 ### View logs
 
-```bash
-sudo journalctl -u rain-bypass -f          # follow live
-sudo journalctl -u rain-bypass --since today
-```
-
-Set `log_level = "DEBUG"` in `settings.toml` for API `queryCost` and extra detail (restart the service after).
+Use `journalctl` — see [Logs](#logs) in the command reference. Set `log_level = "DEBUG"` in `settings.toml` for API `queryCost` and extra detail.
 
 ### Manual check (one cycle)
 
-Runs weather + decision + relay once, then exits (same as the service’s daily tick):
-
-```bash
-cd ~/sprinkler-rain-bypass
-.venv/bin/python -m rain_bypass --once
-```
-
-Use this after changing settings to verify behavior without waiting for the next scheduled check.
+Runs weather + decision + relay once, then exits (same as the service’s daily tick). Use `rain-bypass --once` after changing settings to verify behavior without waiting for the next scheduled check.
 
 ### Change settings
 
@@ -126,36 +257,6 @@ Use this after changing settings to verify behavior without waiting for the next
 | Sewer window, GPIO, monthly balance, etc. | `nano settings.toml` then `sudo systemctl restart rain-bypass` |
 
 After editing `settings.toml`, run `status` or `--once` to confirm the new logic.
-
-### Update from GitHub
-
-On the Pi:
-
-```bash
-cd ~/sprinkler-rain-bypass
-git pull
-.venv/bin/pip install -e '.[gpio]'
-sudo systemctl restart rain-bypass
-.venv/bin/python -m rain_bypass status    # optional sanity check
-```
-
-### Service control
-
-```bash
-sudo systemctl status rain-bypass
-sudo systemctl restart rain-bypass
-sudo systemctl stop rain-bypass      # relay stays at last state until next run
-```
-
-### Development / off-Pi
-
-```bash
-python -m rain_bypass --once   # single check (set gpio.mock = true in settings)
-python -m rain_bypass          # loop until Ctrl+C
-python -m rain_bypass status
-```
-
-Use `gpio.mock = true` in settings to develop without a Pi.
 
 ## Config (`settings.toml`)
 
@@ -224,26 +325,9 @@ Layered modules: `config`, `balance`, `settings_io`, `windows`, `weather` (httpx
 
 ## Development
 
-Dependencies are **unpinned** — every install uses `pip install --upgrade` for the latest releases. Install dev dependencies once, then enable Git hooks so CI failures are caught **before** you push:
+Dependencies are **unpinned** — every install uses `pip install --upgrade` for the latest releases. See [Development & CI](#development--ci) in the command reference for install, hooks, and local CI commands.
 
-```bash
-pip install -e ".[dev,gpio]"
-pre-commit install   # commit: Ruff + ShellCheck; push: Pyright + pytest too
-```
-
-Run the same checks as GitHub Actions manually (recommended on Windows before every commit):
-
-```powershell
-.\scripts\ci.ps1
-```
-
-```bash
-./scripts/ci.sh
-```
-
-If Ruff auto-fixes imports during a hook run, stage those edits and commit again. `.gitattributes`, `.editorconfig`, and `.vscode/settings.json` keep **LF** line endings on all platforms (required for Pi and Linux CI). Install the **EditorConfig** extension if Cursor prompts you. Hooks use latest pip packages (`ruff`, `shellcheck-py`) — nothing is version-pinned in config files.
-
-Pyright alone: `pyright`
+`.gitattributes`, `.editorconfig`, and `.vscode/settings.json` keep **LF** line endings on all platforms (required for Pi and Linux CI). Install the **EditorConfig** extension if Cursor prompts you.
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 
