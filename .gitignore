@@ -14,7 +14,9 @@ build/
 htmlcov/
 .ruff_cache/
 
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 .DS_Store
 Thumbs.db
