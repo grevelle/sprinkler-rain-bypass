@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `scripts/check_30day_rain.py` — redundant with `pytest -m live`; imported private weather internals and had no tests.
+
 ## [5.2.3] - 2026-07-06
 
 ### Fixed

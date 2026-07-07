@@ -261,7 +261,6 @@ Live weather smoke test (needs real `settings.toml` with API key):
 
 ```bash
 pytest -q -m live
-python scripts/check_30day_rain.py        # print 30-day daily precip from Visual Crossing
 ```
 
 ## Usage
@@ -369,9 +368,9 @@ There is **no weekly schedule** — each day recomputes one ON/OFF for the next 
 - Set `log_level = "DEBUG"` to log `queryCost` each request.
 - Match `location.timezone` to your coordinates; a mismatch with the API’s resolved timezone is logged as a warning.
 
-### Upgrading from v4
+### Upgrading from older releases
 
-Replace `settings.toml` from the new `settings.example.toml`. Removed keys include `inches_required`, `forecast_inches_max`, `near_term_*`, `rain_delay_days`, `updates_per_day`, and `past_days`. See [CHANGELOG.md](CHANGELOG.md).
+See [CHANGELOG.md](CHANGELOG.md) for version history and migration notes (e.g. v4 → v5 settings key changes).
 
 ## Code
 
@@ -450,6 +449,12 @@ Configure pins in `settings.toml` under `[gpio]`. Relay **COM/NO** (or your modu
 ### Safety
 
 Verify relay behavior with your controller before unattended use. Match relay rating to your bypass circuit.
+
+### Photos
+
+![Relay and LED wiring](docs/images/IMG_0123.JPG)
+
+![Controller rain-bypass terminals](docs/images/IMG_0124.JPG)
 
 ## systemd
 
