@@ -12,12 +12,14 @@ from typer.testing import CliRunner
 from rain_bypass.config import Location, load_settings
 from rain_bypass.exceptions import WeatherError
 from rain_bypass.install_cli import (
+    AUTO_UPDATE_SERVICE_NAME,
     SERVICE_NAME,
     PromptDefaults,
     TyperPrompter,
     app,
     build_settings,
     ensure_state_writable,
+    install_autoupdate,
     install_systemd_unit,
     load_existing_settings_fields,
     load_prompt_defaults,
@@ -25,6 +27,8 @@ from rain_bypass.install_cli import (
     main,
     prompt_settings,
     prompt_watering_profile,
+    render_autoupdate_service,
+    render_autoupdate_timer,
     render_systemd_unit,
     repo_root,
     resolve_state_path,
@@ -759,6 +763,27 @@ def test_run_install_invokes_systemd(tmp_path, monkeypatch):
         "rain_bypass.install_cli.install_systemd_unit",
         lambda *args, **kwargs: invoked.append(True),
     )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.install_autoupdate",
+        lambda *args, **kwargs: None,
+    )
+    prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False])
+    run_install(tmp_path, prompter=prompter, skip_once=True)
+    assert invoked == [True]
+
+
+def test_run_install_invokes_autoupdate_on_pi(tmp_path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    invoked: list[bool] = []
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.install_systemd_unit",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.install_autoupdate",
+        lambda *args, **kwargs: invoked.append(True),
+    )
     prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False])
     run_install(tmp_path, prompter=prompter, skip_once=True)
     assert invoked == [True]
@@ -890,3 +915,157 @@ def test_typer_prompter_delegates(monkeypatch):
     assert prompter.text("label", default="d") == "value"
     assert prompter.secret("label") == "value"
     assert prompter.confirm("label", default=False) is True
+
+
+def test_render_autoupdate_service():
+    text = render_autoupdate_service(Path("/opt/sprinkler-rain-bypass"))
+    assert "/opt/sprinkler-rain-bypass/scripts/auto-update.sh" in text
+    assert "@ROOT@" not in text
+
+
+def test_render_autoupdate_service_missing_template(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.autoupdate_service_template_path",
+        lambda: tmp_path / "missing.service.in",
+    )
+    with pytest.raises(FileNotFoundError, match="auto-update service template"):
+        render_autoupdate_service(tmp_path)
+
+
+def test_render_autoupdate_timer():
+    text = render_autoupdate_timer()
+    assert "OnCalendar=*-*-* 04:00:00" in text
+
+
+def test_render_autoupdate_timer_missing_template(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.autoupdate_timer_template_path",
+        lambda: tmp_path / "missing.timer.in",
+    )
+    with pytest.raises(FileNotFoundError, match="auto-update timer template"):
+        render_autoupdate_timer()
+
+
+def test_install_autoupdate_skips_without_systemctl(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.install_cli.shutil.which", lambda _name: None)
+    install_autoupdate(tmp_path, prompter=FakePrompter(confirms=[True]))
+
+
+def test_install_autoupdate_declined(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    install_autoupdate(tmp_path, prompter=FakePrompter(confirms=[False]))
+
+
+def test_install_autoupdate_missing_script(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    install_autoupdate(tmp_path, prompter=FakePrompter(confirms=[True]))
+
+
+def test_install_autoupdate_installs(monkeypatch, tmp_path):
+    script = tmp_path / "scripts"
+    script.mkdir()
+    (script / "auto-update.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    chmod_calls: list[tuple[Path, int]] = []
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.os.chmod",
+        lambda path, mode: chmod_calls.append((path, mode)),
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.autoupdate_service_template_path",
+        lambda: repo_root() / "deploy" / "rain-bypass-auto-update.service.in",
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.autoupdate_timer_template_path",
+        lambda: repo_root() / "deploy" / "rain-bypass-auto-update.timer.in",
+    )
+    install_autoupdate(
+        tmp_path,
+        prompter=FakePrompter(confirms=[True]),
+        run_command=fake_run,
+        skip_confirm=True,
+    )
+    assert chmod_calls == [(script / "auto-update.sh", 0o755)]
+    assert calls[0][:2] == ["sudo", "tee"]
+    assert str(calls[0][2]).endswith(f"{AUTO_UPDATE_SERVICE_NAME}.service")
+    assert calls[-1] == [
+        "sudo",
+        "systemctl",
+        "enable",
+        "--now",
+        f"{AUTO_UPDATE_SERVICE_NAME}.timer",
+    ]
+
+
+def test_cli_setup_autoupdate(monkeypatch):
+    invoked: list[bool] = []
+
+    def _setup(*_args, **_kwargs):
+        invoked.append(True)
+
+    monkeypatch.setattr("rain_bypass.install_cli.install_autoupdate", _setup)
+    result = CliRunner().invoke(app, ["setup-autoupdate", "--yes"])
+    assert result.exit_code == 0
+    assert invoked == [True]
+
+
+def test_install_autoupdate_skips_chmod_off_posix(monkeypatch, tmp_path):
+    script = tmp_path / "scripts"
+    script.mkdir()
+    (script / "auto-update.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    chmod_calls: list[tuple[Path, int]] = []
+
+    def fake_run(cmd, **kwargs):
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: False)
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.os.chmod",
+        lambda path, mode: chmod_calls.append((path, mode)),
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    install_autoupdate(
+        tmp_path,
+        prompter=FakePrompter(confirms=[True]),
+        run_command=fake_run,
+        skip_confirm=True,
+    )
+    assert chmod_calls == []
+
+
+def test_run_install_skips_autoupdate_off_pi(tmp_path, monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: False)
+    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    systemd_calls: list[bool] = []
+    autoupdate_calls: list[bool] = []
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.install_systemd_unit",
+        lambda *args, **kwargs: systemd_calls.append(True),
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.install_autoupdate",
+        lambda *args, **kwargs: autoupdate_calls.append(True),
+    )
+    prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False])
+    run_install(tmp_path, prompter=prompter, skip_once=True)
+    assert systemd_calls == [True]
+    assert autoupdate_calls == []

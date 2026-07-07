@@ -23,6 +23,7 @@ from rain_bypass.weather import resolve_location, weather_api_smoke
 RunCommand = Callable[..., subprocess.CompletedProcess[bytes]]
 
 SERVICE_NAME = "rain-bypass"
+AUTO_UPDATE_SERVICE_NAME = "rain-bypass-auto-update"
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,
@@ -64,6 +65,14 @@ def repo_root() -> Path:
 
 def systemd_template_path() -> Path:
     return repo_root() / "deploy" / "rain-bypass.service.in"
+
+
+def autoupdate_service_template_path() -> Path:
+    return repo_root() / "deploy" / "rain-bypass-auto-update.service.in"
+
+
+def autoupdate_timer_template_path() -> Path:
+    return repo_root() / "deploy" / "rain-bypass-auto-update.timer.in"
 
 
 def render_systemd_unit(root: Path, python: Path, settings: Path, service_user: str) -> str:
@@ -387,6 +396,71 @@ def run_configure(
     typer.echo("  Other settings: nano settings.toml (then restart the service)")
 
 
+def render_autoupdate_service(root: Path) -> str:
+    template = autoupdate_service_template_path()
+    if not template.is_file():
+        raise FileNotFoundError(f"auto-update service template not found: {template}")
+    return template.read_text(encoding="utf-8").replace("@ROOT@", root.as_posix())
+
+
+def render_autoupdate_timer() -> str:
+    template = autoupdate_timer_template_path()
+    if not template.is_file():
+        raise FileNotFoundError(f"auto-update timer template not found: {template}")
+    return template.read_text(encoding="utf-8")
+
+
+def install_autoupdate(
+    root: Path,
+    *,
+    prompter: Prompter,
+    run_command: RunCommand | None = None,
+    skip_confirm: bool = False,
+) -> None:
+    runner: RunCommand = run_command or subprocess.run
+    if shutil.which("systemctl") is None:
+        typer.secho(
+            "warning: systemctl not found; skipping auto-update timer.", fg=typer.colors.YELLOW
+        )
+        return
+    if not skip_confirm and not prompter.confirm(
+        "Enable daily automatic OS and application updates (04:00)?",
+        default=True,
+    ):
+        return
+
+    auto_script = root / "scripts" / "auto-update.sh"
+    if not auto_script.is_file():
+        typer.secho(
+            f"warning: {auto_script} not found; skipping auto-update timer.",
+            fg=typer.colors.YELLOW,
+        )
+        return
+    if _is_posix():
+        os.chmod(auto_script, 0o755)
+
+    service_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.service")
+    timer_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.timer")
+    typer.echo(f"==> Installing {service_path} and {timer_path} (requires sudo)")
+    runner(
+        ["sudo", "tee", str(service_path)],
+        input=render_autoupdate_service(root).encode(),
+        check=True,
+    )
+    runner(
+        ["sudo", "tee", str(timer_path)],
+        input=render_autoupdate_timer().encode(),
+        check=True,
+    )
+    runner(["sudo", "systemctl", "daemon-reload"], check=True)
+    runner(
+        ["sudo", "systemctl", "enable", "--now", f"{AUTO_UPDATE_SERVICE_NAME}.timer"], check=True
+    )
+    typer.echo(
+        f"==> Auto-update enabled. Status: sudo systemctl list-timers {AUTO_UPDATE_SERVICE_NAME}.timer"
+    )
+
+
 def install_systemd_unit(
     root: Path,
     python: Path,
@@ -484,6 +558,8 @@ def run_install(
         install_systemd_unit(
             install_root, python, settings_path, prompter=prompts, run_command=run_command
         )
+        if is_raspberry_pi():
+            install_autoupdate(install_root, prompter=prompts, run_command=run_command)
 
     typer.echo("\n==> Done.")
     typer.echo(
@@ -538,6 +614,23 @@ def configure(
         lambda: run_configure(
             skip_api_test=skip_api_test,
             skip_service_restart=skip_service_restart,
+        )
+    )
+
+
+@app.command("setup-autoupdate")
+def setup_autoupdate(
+    yes: Annotated[
+        bool,
+        typer.Option("-y", "--yes", help="Install without prompting."),
+    ] = False,
+) -> None:
+    """Install and enable the daily OS + app auto-update timer."""
+    _handle_cli_errors(
+        lambda: install_autoupdate(
+            repo_root(),
+            prompter=TyperPrompter(),
+            skip_confirm=yes,
         )
     )
 

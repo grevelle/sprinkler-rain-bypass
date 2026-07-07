@@ -19,7 +19,7 @@ jobs:
       # Non-mutating lint (pre-commit --fix modifies files and fails CI if anything was dirty).
       - run: ruff check .
       - run: ruff format --check .
-      - run: shellcheck install.sh configure.sh
+      - run: shellcheck install.sh configure.sh scripts/auto-update.sh
       - run: python scripts/check_lf.py
       - run: pyright
       - run: pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100 --tb=short

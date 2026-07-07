@@ -39,6 +39,7 @@ cp settings.example.toml settings.toml   # edit api_key (and zip_code if not 530
 | GPIO library | **`RPi.GPIO`** — correct for Zero W’s classic BCM2835 GPIO |
 | Relay module | **3.3 V** logic (see Hardware below) |
 | systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
+| Maintenance | Optional **daily auto-update** at 04:00 — OS packages, `git pull`, pip, service restart (see [Automatic updates](#automatic-daily-updates)) |
 
 On boot the relay **blocks watering** until the first check completes, then applies the decision from the daily check.
 
@@ -181,6 +182,44 @@ sudo systemctl restart rain-bypass
 .venv/bin/python -m rain_bypass status    # optional sanity check
 ```
 
+### Automatic daily updates
+
+`./install.sh` on a Raspberry Pi can install a **systemd timer** that runs every day at **04:00** (after the default midnight check and typical 1 AM irrigation). It:
+
+1. Upgrades all **apt** packages (Raspberry Pi OS)
+2. **`git pull`** from `main`
+3. **`pip install -e '.[gpio]'`** for latest Python libraries
+4. **Restarts** `rain-bypass`
+5. **Reboots** if a kernel/glibc update requires it
+
+Enable on an existing Pi:
+
+```bash
+cd ~/sprinkler-rain-bypass
+git pull
+.venv/bin/python -m rain_bypass.install_cli setup-autoupdate --yes
+```
+
+Check the timer:
+
+```bash
+sudo systemctl list-timers rain-bypass-auto-update.timer
+sudo journalctl -u rain-bypass-auto-update.service --since today
+```
+
+Run once manually (requires root/sudo for apt):
+
+```bash
+cd ~/sprinkler-rain-bypass
+sudo ./scripts/auto-update.sh
+```
+
+Disable:
+
+```bash
+sudo systemctl disable --now rain-bypass-auto-update.timer
+```
+
 ### Development & CI
 
 ```bash
@@ -196,7 +235,7 @@ ruff check .
 ruff check --fix .
 ruff format .
 ruff format --check .
-shellcheck install.sh configure.sh
+shellcheck install.sh configure.sh scripts/auto-update.sh
 python scripts/check_lf.py
 pyright
 pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100

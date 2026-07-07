@@ -17,7 +17,7 @@ repos:
         name: shellcheck
         entry: shellcheck
         language: system
-        files: ^(install|configure)\.sh$
+        files: ^(install|configure)\.sh$|^scripts/auto-update\.sh$
       - id: check-lf
         name: check LF line endings
         entry: python scripts/check_lf.py

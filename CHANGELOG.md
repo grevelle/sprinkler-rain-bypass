@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-07-06
+
+### Added
+
+- **Daily auto-update** — `scripts/auto-update.sh` plus systemd timer `rain-bypass-auto-update.timer` (04:00 local) upgrades OS packages, `git pull`s the app, refreshes Python dependencies, restarts `rain-bypass`, and reboots if the kernel requires it.
+- **`rain-bypass-install setup-autoupdate`** (`--yes` for non-interactive) — enable the timer on an existing Pi without re-running `./install.sh`.
+- `./install.sh` on Raspberry Pi offers to enable auto-update after installing the service.
+
 ## [5.1.2] - 2026-07-04
 
 ### Changed

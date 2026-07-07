@@ -18,3 +18,4 @@
 install.sh text eol=lf
 configure.sh text eol=lf
 scripts/ci.sh text eol=lf
+scripts/auto-update.sh text eol=lf

@@ -1,0 +1,11 @@
+# Template — placeholder @ROOT@ filled by rain-bypass-install.
+[Unit]
+Description=Daily auto-update for Sprinkler Rain Bypass (OS, app, libraries)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/scripts/auto-update.sh
+Nice=10
