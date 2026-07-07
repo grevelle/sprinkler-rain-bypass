@@ -18,18 +18,26 @@ def tick(settings: Settings, state: State, apply: Callable[[bool], None]) -> Sta
     if evaluation is not None:
         rainfall_inches = evaluation.rain_mtd
         forecast_inches = evaluation.forecast_inches
+        max_daily_inches = evaluation.max_daily_inches
+        freeze_block = evaluation.freeze_block
     elif decision.error is not None:
         rainfall_inches = state.rainfall_inches
         forecast_inches = state.forecast_inches
+        max_daily_inches = state.max_daily_inches
+        freeze_block = state.freeze_block
     else:
         rainfall_inches = None
         forecast_inches = None
+        max_daily_inches = None
+        freeze_block = None
     updated = state.model_copy(
         update={
             "last_weather_update": time.time(),
             "watering_required": decision.watering_required,
             "rainfall_inches": rainfall_inches,
             "forecast_inches": forecast_inches,
+            "max_daily_inches": max_daily_inches,
+            "freeze_block": freeze_block,
             "balance_month": (
                 decision.balance_month
                 if decision.balance_month is not None

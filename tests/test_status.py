@@ -10,14 +10,19 @@ from typer.testing import CliRunner
 
 from rain_bypass.cli import app
 from rain_bypass.config import ConfigError, State
-from rain_bypass.models import WeatherSnapshot
+from rain_bypass.models import Evaluation, WeatherSnapshot
 from rain_bypass.status import (
+    format_deficit_formula,
     format_duration,
+    format_safety_gate,
     format_status,
     format_timestamp,
+    format_updated,
+    format_would_decide_now,
     gather_status,
     print_status,
     relay_label,
+    relay_mismatch_note,
 )
 
 
@@ -28,6 +33,23 @@ def _snapshot(
     freeze_block: bool = False,
 ) -> WeatherSnapshot:
     return WeatherSnapshot(rain_mtd, forecast, max_daily, freeze_block)
+
+
+def _evaluation(**overrides: object) -> Evaluation:
+    defaults = {
+        "watering_required": True,
+        "balance_ok": True,
+        "safety_ok": True,
+        "deficit": 0.5,
+        "target_to_date": 0.97,
+        "monthly_target": 5.0,
+        "rain_mtd": 0.26,
+        "forecast_inches": 0.02,
+        "max_daily_inches": 0.05,
+        "freeze_block": False,
+    }
+    defaults.update(overrides)
+    return Evaluation(**defaults)  # type: ignore[arg-type]
 
 
 def test_format_duration_minutes() -> None:
@@ -51,6 +73,12 @@ def test_format_timestamp_value() -> None:
     assert "2023" in text
 
 
+def test_format_updated_includes_age() -> None:
+    now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("UTC"))
+    text = format_updated(1_700_000_000.0, "UTC", now=now)
+    assert "ago" in text
+
+
 def test_relay_label_unknown() -> None:
     assert "unknown" in relay_label(None)
 
@@ -61,6 +89,49 @@ def test_relay_label_allow() -> None:
 
 def test_relay_label_block() -> None:
     assert "BLOCK" in relay_label(False)
+
+
+def test_format_deficit_formula() -> None:
+    evaluation = _evaluation(
+        target_to_date=0.97,
+        rain_mtd=0.26,
+        forecast_inches=0.02,
+        deficit=0.05,
+    )
+    text = format_deficit_formula(evaluation, 0.63, 0.3)
+    assert "0.97 − 0.26 − 0.63 − 0.02 = 0.05 in" in text
+    assert "need ≥ 0.30 to allow" in text
+
+
+def test_format_updated_without_now() -> None:
+    assert format_updated(1_700_000_000.0, "UTC") == format_timestamp(1_700_000_000.0, "UTC")
+
+
+def test_format_safety_gate_storm_block() -> None:
+    evaluation = _evaluation(safety_ok=False, freeze_block=False, max_daily_inches=0.25)
+    assert format_safety_gate(evaluation, safety_known=True) == "block (storm / heavy rain)"
+
+
+def test_format_safety_gate_unknown() -> None:
+    assert format_safety_gate(_evaluation(), safety_known=False) == (
+        "unknown (not saved — run without --cached)"
+    )
+
+
+def test_format_would_decide_now_block() -> None:
+    text = format_would_decide_now(False, safety_known=True, balance_ok=False)
+    assert text == "BLOCK watering (skip today's cycle)"
+
+
+def test_format_would_decide_now_balance_only() -> None:
+    text = format_would_decide_now(None, safety_known=False, balance_ok=True)
+    assert "ALLOW by balance" in text
+    assert "--cached" in text
+
+
+def test_relay_mismatch_note() -> None:
+    assert relay_mismatch_note(True, False) is not None
+    assert relay_mismatch_note(True, True) is None
 
 
 def test_gather_status_sewer_lockout(settings, monkeypatch) -> None:
@@ -100,12 +171,18 @@ def test_gather_status_weather_error(settings, monkeypatch) -> None:
     assert snap.preview.would_water is None
 
 
-def test_gather_status_cached_uses_saved_decision(settings, monkeypatch) -> None:
+def test_gather_status_cached_projects(settings, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
-    state = State(watering_required=False)
+    state = State(
+        watering_required=True,
+        rainfall_inches=10.0,
+        forecast_inches=0.0,
+        max_daily_inches=0.0,
+        freeze_block=False,
+    )
     snap = gather_status(settings, state, fetch_live=False)
+    assert snap.preview.from_saved_weather is True
     assert snap.preview.would_water is False
-    assert snap.preview.live is None
 
 
 def test_format_status_sections(settings, monkeypatch) -> None:
@@ -122,6 +199,8 @@ def test_format_status_sections(settings, monkeypatch) -> None:
         last_weather_update=1_700_000_000.0,
         rainfall_inches=1.0,
         forecast_inches=0.2,
+        max_daily_inches=0.1,
+        freeze_block=False,
         irrigation_inches_mtd=0.3,
         last_error="previous failure",
     )
@@ -130,7 +209,10 @@ def test_format_status_sections(settings, monkeypatch) -> None:
     assert "53029" in text
     assert "previous failure" in text
     assert "Balance (July)" in text
+    assert "Formula" in text
+    assert "Would decide now" in text
     assert "ALLOW watering" in text
+    assert "ago" in text
 
 
 def test_format_status_cached_mode(settings, monkeypatch) -> None:
@@ -138,10 +220,54 @@ def test_format_status_cached_mode(settings, monkeypatch) -> None:
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
-    snap = gather_status(settings, State(watering_required=True), fetch_live=False)
+    state = State(
+        watering_required=True,
+        rainfall_inches=0.0,
+        forecast_inches=0.0,
+        max_daily_inches=0.0,
+        freeze_block=False,
+    )
+    snap = gather_status(settings, state, fetch_live=False)
     text = format_status(snap)
-    assert "skipped (--cached)" in text
+    assert "Projected decision (saved weather, no API)" in text
+    assert "Live evaluation" not in text
+    assert "Would decide now" in text
     assert "ALLOW watering if the panel runs today" in text
+
+
+def test_format_status_cached_shows_mismatch(settings, monkeypatch) -> None:
+    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
+    monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
+    monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
+    state = State(
+        watering_required=True,
+        rainfall_inches=10.0,
+        forecast_inches=0.0,
+        max_daily_inches=0.0,
+        freeze_block=False,
+    )
+    text = format_status(gather_status(settings, state, fetch_live=False))
+    assert "Note: saved relay is ALLOW" in text
+    assert "projects BLOCK now" in text
+
+
+def test_format_status_cached_missing_safety_fields(settings, monkeypatch) -> None:
+    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
+    monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
+    monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
+    state = State(
+        watering_required=False,
+        rainfall_inches=0.0,
+        forecast_inches=0.0,
+        irrigation_inches_mtd=0.0,
+    )
+    text = format_status(gather_status(settings, state, fetch_live=False))
+    assert "Max day" in text
+    assert "n/a (not saved)" in text
+    assert "unknown (not saved)" in text
+    assert "ALLOW by balance" in text
 
 
 def test_format_status_unknown_verdict(settings, monkeypatch) -> None:
@@ -151,6 +277,7 @@ def test_format_status_unknown_verdict(settings, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
     snap = gather_status(settings, State(), fetch_live=False)
     text = format_status(snap)
+    assert "no saved values" in text
     assert "unknown (need live weather or a completed cycle)" in text
 
 
@@ -163,6 +290,33 @@ def test_format_status_sewer_lockout(settings, monkeypatch) -> None:
     assert "Sewer lockout" in text
     assert "ACTIVE" in text
     assert "BLOCK watering" in text
+
+
+def test_format_status_live_without_weather_payload(settings, monkeypatch) -> None:
+    from rain_bypass.models import Preview
+    from rain_bypass.status import StatusSnapshot, format_status
+
+    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
+    preview_result = Preview(
+        effective_state=State(),
+        sewer_lockout=False,
+        live=None,
+        live_error=None,
+        evaluation=None,
+        cached_verdict=None,
+    )
+    snapshot = StatusSnapshot(
+        settings=settings,
+        state=State(),
+        local_time=fixed_now,
+        next_check_seconds=60.0,
+        preview=preview_result,
+        fetch_live=True,
+    )
+    text = format_status(snapshot)
+    assert "Live evaluation" in text
+    assert "Would decide now" in text
 
 
 def test_format_status_weather_error(settings, monkeypatch) -> None:
@@ -195,7 +349,7 @@ def test_format_status_freeze_block(settings, monkeypatch) -> None:
     assert "Freeze block" in text
     assert "yes" in text
     assert "Safety gate" in text
-    assert "block" in text
+    assert "block (freeze)" in text
 
 
 def test_format_status_block_verdict(settings, monkeypatch) -> None:
@@ -220,13 +374,15 @@ def test_print_status_cli(settings_path, monkeypatch) -> None:
     result = CliRunner().invoke(app, ["status", "--config", str(settings_path)])
     assert result.exit_code == 0
     assert "Sprinkler Rain Bypass" in result.stdout
+    assert "Would decide now" in result.stdout
 
 
 def test_print_status_cli_cached(settings_path, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
     result = CliRunner().invoke(app, ["status", "--config", str(settings_path), "--cached"])
     assert result.exit_code == 0
-    assert "skipped (--cached)" in result.stdout
+    assert "Projected decision" in result.stdout
+    assert "Live evaluation" not in result.stdout
 
 
 def test_print_status_config_error(tmp_path: Path) -> None:

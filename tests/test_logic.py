@@ -58,6 +58,49 @@ def test_preview_cached_verdict(settings, monkeypatch) -> None:
     assert result.would_water is True
 
 
+def test_preview_cached_projects_from_saved_weather(settings, monkeypatch) -> None:
+    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    state = State(
+        watering_required=True,
+        rainfall_inches=10.0,
+        forecast_inches=0.0,
+        max_daily_inches=0.0,
+        freeze_block=False,
+        irrigation_inches_mtd=0.0,
+    )
+    result = preview(settings, state, fetch_live=False)
+    assert result.from_saved_weather is True
+    assert result.evaluation is not None
+    assert result.would_water is False
+    assert result.evaluation.balance_ok is False
+
+
+def test_preview_cached_safety_unknown_when_not_saved(settings, monkeypatch) -> None:
+    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    state = State(
+        watering_required=True,
+        rainfall_inches=0.0,
+        forecast_inches=0.0,
+        irrigation_inches_mtd=0.0,
+    )
+    result = preview(settings, state, fetch_live=False)
+    assert result.safety_known is False
+    assert result.would_water is None
+
+
+def test_preview_cached_safety_unknown_blocks_on_balance(settings, monkeypatch) -> None:
+    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    state = State(
+        watering_required=True,
+        rainfall_inches=10.0,
+        forecast_inches=0.0,
+        irrigation_inches_mtd=0.0,
+    )
+    result = preview(settings, state, fetch_live=False)
+    assert result.safety_known is False
+    assert result.would_water is False
+
+
 def test_preview_live_success(settings, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
     monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot())
@@ -93,6 +136,8 @@ def test_preview_would_water_from_evaluation() -> None:
         monthly_target=5.0,
         rain_mtd=0.0,
         forecast_inches=0.0,
+        max_daily_inches=0.0,
+        freeze_block=False,
     )
     result = Preview(
         effective_state=State(),

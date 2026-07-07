@@ -23,6 +23,8 @@ class Evaluation:
     monthly_target: float
     rain_mtd: float
     forecast_inches: float
+    max_daily_inches: float
+    freeze_block: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,12 +35,18 @@ class Preview:
     live_error: str | None
     evaluation: Evaluation | None
     cached_verdict: bool | None
+    from_saved_weather: bool = False
+    safety_known: bool = True
 
     @property
     def would_water(self) -> bool | None:
         if self.sewer_lockout:
             return False
         if self.evaluation is not None:
+            if not self.safety_known:
+                if not self.evaluation.balance_ok:
+                    return False
+                return None
             return self.evaluation.watering_required
         return self.cached_verdict
 

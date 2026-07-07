@@ -54,7 +54,24 @@ def evaluate_weather(
         monthly_target=month_target,
         rain_mtd=snapshot.rain_mtd,
         forecast_inches=snapshot.forecast_inches,
+        max_daily_inches=snapshot.max_daily_inches,
+        freeze_block=snapshot.freeze_block,
     )
+
+
+def _snapshot_from_state(state: State) -> WeatherSnapshot | None:
+    if state.rainfall_inches is None or state.forecast_inches is None:
+        return None
+    return WeatherSnapshot(
+        rain_mtd=state.rainfall_inches,
+        forecast_inches=state.forecast_inches,
+        max_daily_inches=state.max_daily_inches or 0.0,
+        freeze_block=bool(state.freeze_block),
+    )
+
+
+def _safety_fields_saved(state: State) -> bool:
+    return state.max_daily_inches is not None and state.freeze_block is not None
 
 
 def preview(settings: Settings, state: State, *, fetch_live: bool = True) -> Preview:
@@ -74,13 +91,27 @@ def preview(settings: Settings, state: State, *, fetch_live: bool = True) -> Pre
 
     if not fetch_live:
         cached = state.watering_required if state.watering_required is not None else None
+        saved = _snapshot_from_state(effective)
+        if saved is None:
+            return Preview(
+                effective_state=effective,
+                sewer_lockout=False,
+                live=None,
+                live_error=None,
+                evaluation=None,
+                cached_verdict=cached,
+            )
+        safety_known = _safety_fields_saved(state)
+        evaluation = evaluate_weather(settings, saved, effective.irrigation_inches_mtd, today)
         return Preview(
             effective_state=effective,
             sewer_lockout=False,
             live=None,
             live_error=None,
-            evaluation=None,
+            evaluation=evaluation,
             cached_verdict=cached,
+            from_saved_weather=True,
+            safety_known=safety_known,
         )
 
     try:

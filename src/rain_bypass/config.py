@@ -154,6 +154,8 @@ class State(FrozenModel):
     watering_required: bool | None = None
     rainfall_inches: float | None = None
     forecast_inches: float | None = None
+    max_daily_inches: float | None = None
+    freeze_block: bool | None = None
     balance_month: int | None = None
     irrigation_inches_mtd: float = 0.0
     last_error: str | None = None
