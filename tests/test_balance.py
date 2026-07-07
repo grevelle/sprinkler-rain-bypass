@@ -3,8 +3,7 @@ from datetime import date
 import pytest
 
 from rain_bypass import balance
-from rain_bypass.config import State
-from rain_bypass.settings_io import load_example_settings
+from rain_bypass.config import State, load_example_settings
 
 
 @pytest.fixture

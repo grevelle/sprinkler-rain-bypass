@@ -13,9 +13,8 @@ from typer.testing import CliRunner
 
 from rain_bypass import balance
 from rain_bypass.cli import app
-from rain_bypass.config import Settings, State, local_today
+from rain_bypass.config import Settings, State, load_example_settings, local_today, write_settings
 from rain_bypass.logic import decide, safety_allows_watering
-from rain_bypass.settings_io import load_example_settings, write_settings
 from rain_bypass.weather import fetch_weather, sum_precip, timeline_request_params, timeline_url_for
 from rain_bypass.windows import forecast_window, month_start, timeline_window
 
@@ -130,8 +129,9 @@ def test_live_decide_matches_balance_and_safety(live_case: LiveCase) -> None:
     snapshot = fetch_weather(settings)
     decision = decide(settings, State())
     assert decision.error is None
-    assert decision.rain_mtd == pytest.approx(snapshot.rain_mtd)
-    assert decision.forecast_inches == pytest.approx(snapshot.forecast_inches)
+    assert decision.evaluation is not None
+    assert decision.evaluation.rain_mtd == pytest.approx(snapshot.rain_mtd)
+    assert decision.evaluation.forecast_inches == pytest.approx(snapshot.forecast_inches)
     today = local_today(settings.location)
     expected_balance = balance.balance_allows_watering(
         today,
@@ -140,7 +140,7 @@ def test_live_decide_matches_balance_and_safety(live_case: LiveCase) -> None:
         0.0,
         snapshot.forecast_inches,
     )
-    assert decision.balance_ok is expected_balance
+    assert decision.evaluation.balance_ok is expected_balance
     assert decision.watering_required is (
         expected_balance and safety_allows_watering(snapshot, settings)
     )

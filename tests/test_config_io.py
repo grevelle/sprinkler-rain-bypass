@@ -3,10 +3,17 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from rain_bypass.config import Balance, BalanceMonth, Location, State, load_settings
-from rain_bypass.settings_io import (
+from rain_bypass.config import (
     EXAMPLE_SETTINGS_PATH,
+    Balance,
+    BalanceMonth,
+    ConfigError,
+    Location,
+    State,
+    Watering,
     load_example_settings,
+    load_settings,
+    validate_model,
     write_settings,
 )
 
@@ -35,6 +42,33 @@ def test_location_rejects_invalid_zip():
             longitude=-88.351,
             timezone="America/Chicago",
         )
+
+
+def test_validate_model_zip_rejects_invalid():
+    with pytest.raises(ConfigError):
+        validate_model(
+            Location,
+            {"zip_code": "bad", "latitude": 0, "longitude": 0, "timezone": "UTC"},
+        )
+
+
+def test_validate_model_zip_accepts_valid():
+    location = validate_model(
+        Location,
+        {"zip_code": "53029", "latitude": 0, "longitude": 0, "timezone": "UTC"},
+    )
+    assert location.zip_code == "53029"
+
+
+def test_validate_model_inches_per_cycle():
+    balance = validate_model(Balance, {"inches_per_cycle": "0.3"})
+    assert balance.inches_per_cycle == pytest.approx(0.3)
+
+
+def test_validate_model_check_time():
+    watering = validate_model(Watering, {"check_hour": 4, "check_minute": 30})
+    assert watering.check_hour == 4
+    assert watering.check_minute == 30
 
 
 def test_location_normalizes_zip_plus_four():
@@ -87,6 +121,25 @@ def test_write_settings_round_trip(tmp_path: Path):
 
 def test_load_example_settings_missing_file(tmp_path: Path, monkeypatch):
     missing = tmp_path / "missing.example.toml"
-    monkeypatch.setattr("rain_bypass.settings_io.EXAMPLE_SETTINGS_PATH", missing)
+    monkeypatch.setattr("rain_bypass.config.EXAMPLE_SETTINGS_PATH", missing)
     with pytest.raises(FileNotFoundError, match="Example settings not found"):
         load_example_settings()
+
+
+def test_write_settings_chmod_on_posix(tmp_path: Path, monkeypatch):
+    import os
+
+    import rain_bypass.config as config_module
+
+    chmod_calls: list[tuple[object, int]] = []
+    monkeypatch.setattr(config_module.os, "name", "posix")
+    monkeypatch.setattr(
+        config_module.os,
+        "chmod",
+        lambda path, mode: chmod_calls.append((path, mode)),
+    )
+    path = tmp_path / "settings.toml"
+    write_settings(path, load_example_settings(weather={"api_key": "chmod-key01"}))
+    assert len(chmod_calls) == 1
+    assert os.path.normcase(os.fspath(chmod_calls[0][0])) == os.path.normcase(os.fspath(path))
+    assert chmod_calls[0][1] == 0o600

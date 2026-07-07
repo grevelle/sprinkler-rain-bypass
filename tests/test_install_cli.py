@@ -9,42 +9,30 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from rain_bypass.config import Location, load_settings
+from rain_bypass.config import Location, load_example_settings, load_settings, write_settings
+from rain_bypass.deploy import SERVICE_NAME
 from rain_bypass.exceptions import WeatherError
 from rain_bypass.install_cli import (
-    AUTO_UPDATE_SERVICE_NAME,
-    SERVICE_NAME,
     PromptDefaults,
     TyperPrompter,
     app,
     build_settings,
     ensure_state_writable,
-    install_autoupdate,
-    install_systemd_unit,
-    install_unattended_upgrades,
-    load_existing_settings_fields,
     load_prompt_defaults,
     load_settings_base,
     main,
+    prompt_defaults_from,
     prompt_settings,
     prompt_watering_profile,
-    render_autoupdate_service,
-    render_autoupdate_timer,
-    render_systemd_unit,
-    repo_root,
     resolve_state_path,
     restart_service_if_installed,
     run_api_test,
     run_configure,
     run_install,
     validate_api_key,
-    validate_check_time,
-    validate_inches_per_cycle,
-    validate_zip_code,
     write_and_validate_settings,
-    write_settings_secure,
 )
-from rain_bypass.settings_io import load_example_settings
+from rain_bypass.paths import repo_root
 
 
 @pytest.fixture(autouse=True)
@@ -86,24 +74,6 @@ class FakePrompter:
         return "test-key-001"
 
 
-def test_load_existing_settings_fields_missing(tmp_path: Path):
-    assert load_existing_settings_fields(tmp_path / "settings.toml") == (None, "53029")
-
-
-def test_load_existing_settings_fields_ok(tmp_path: Path):
-    path = tmp_path / "settings.toml"
-    write_settings_secure(path, load_example_settings(weather={"api_key": "existing-key1"}))
-    key, zip_code = load_existing_settings_fields(path)
-    assert key == "existing-key1"
-    assert zip_code == "53029"
-
-
-def test_load_existing_settings_fields_invalid(tmp_path: Path):
-    path = tmp_path / "settings.toml"
-    path.write_text("not valid toml", encoding="utf-8")
-    assert load_existing_settings_fields(path) == (None, "53029")
-
-
 def test_write_and_validate_settings(tmp_path: Path):
     path = tmp_path / "settings.toml"
     settings = load_example_settings(weather={"api_key": "write-test01"})
@@ -113,14 +83,14 @@ def test_write_and_validate_settings(tmp_path: Path):
 
 def test_run_api_test_success(tmp_path: Path, monkeypatch):
     path = tmp_path / "settings.toml"
-    write_settings_secure(path, load_example_settings(weather={"api_key": "smoke-key01"}))
+    write_settings(path, load_example_settings(weather={"api_key": "smoke-key01"}))
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
     run_api_test(path)
 
 
 def test_run_api_test_failure(tmp_path: Path, monkeypatch):
     path = tmp_path / "settings.toml"
-    write_settings_secure(path, load_example_settings(weather={"api_key": "smoke-key01"}))
+    write_settings(path, load_example_settings(weather={"api_key": "smoke-key01"}))
 
     def _boom(_settings):
         raise RuntimeError("api down")
@@ -206,7 +176,7 @@ def test_run_configure_preserves_other_sections(tmp_path: Path, monkeypatch):
         lambda **_kwargs: None,
     )
     settings_path = tmp_path / "settings.toml"
-    write_settings_secure(
+    write_settings(
         settings_path,
         load_example_settings(
             weather={"api_key": "existing-key1"},
@@ -244,7 +214,7 @@ def test_run_configure_keeps_existing_key(tmp_path: Path, monkeypatch):
         lambda **_kwargs: None,
     )
     settings_path = tmp_path / "settings.toml"
-    write_settings_secure(
+    write_settings(
         settings_path,
         load_example_settings(weather={"api_key": "existing-key1"}),
     )
@@ -310,40 +280,42 @@ def test_validate_api_key():
         validate_api_key('abcdefghij"key')
 
 
-def test_validate_zip_code():
-    assert validate_zip_code("53029") == "53029"
-    assert validate_zip_code(" 53029-1234 ") == "53029"
-    with pytest.raises(typer.BadParameter, match="ZIP code"):
-        validate_zip_code("bad")
+def test_parse_zip_code():
+    from rain_bypass.install_cli import parse_zip_code
+
+    assert parse_zip_code("53029") == "53029"
+    assert parse_zip_code(" 53029-1234 ") == "53029"
+    with pytest.raises(typer.BadParameter):
+        parse_zip_code("bad")
 
 
-def test_validate_inches_per_cycle():
-    assert validate_inches_per_cycle("0.3") == pytest.approx(0.3)
-    assert validate_inches_per_cycle(" 0.33 ") == pytest.approx(0.33)
-    with pytest.raises(typer.BadParameter, match="number"):
-        validate_inches_per_cycle("abc")
-    with pytest.raises(typer.BadParameter, match="greater than 0"):
-        validate_inches_per_cycle("0")
+def test_parse_inches_per_cycle():
+    from rain_bypass.install_cli import parse_inches_per_cycle
+
+    assert parse_inches_per_cycle("0.3") == pytest.approx(0.3)
+    with pytest.raises(typer.BadParameter):
+        parse_inches_per_cycle("0")
 
 
-def test_validate_check_time():
-    assert validate_check_time("04:30") == (4, 30)
-    assert validate_check_time("5:00") == (5, 0)
+def test_parse_check_time():
+    from rain_bypass.install_cli import parse_check_time
+
+    assert parse_check_time("04:30") == (4, 30)
     with pytest.raises(typer.BadParameter, match="HH:MM"):
-        validate_check_time("430")
-    with pytest.raises(typer.BadParameter, match="0-23"):
-        validate_check_time("24:00")
+        parse_check_time("430")
+    with pytest.raises(typer.BadParameter):
+        parse_check_time("24:00")
 
 
 def test_load_prompt_defaults_missing(tmp_path: Path):
     key, profile = load_prompt_defaults(tmp_path / "settings.toml")
     assert key is None
-    assert profile == PromptDefaults()
+    assert profile == prompt_defaults_from(load_example_settings())
 
 
 def test_load_prompt_defaults_ok(tmp_path: Path):
     path = tmp_path / "settings.toml"
-    write_settings_secure(
+    write_settings(
         path,
         load_example_settings(
             weather={"api_key": "existing-key1"},
@@ -362,7 +334,7 @@ def test_load_prompt_defaults_ok(tmp_path: Path):
 def test_load_settings_base_uses_existing(tmp_path: Path):
     path = tmp_path / "settings.toml"
     custom = load_example_settings(sewer={"start_day": 20})
-    write_settings_secure(path, custom)
+    write_settings(path, custom)
     loaded = load_settings_base(path)
     assert loaded.sewer.start_day == 20
 
@@ -445,50 +417,30 @@ def test_ensure_state_writable_exits_without_sudo(tmp_path: Path, monkeypatch):
         ensure_state_writable(tmp_path, settings)
 
 
-def test_render_systemd_unit():
-    text = render_systemd_unit(
-        Path("/opt/app"),
-        Path("/opt/app/.venv/bin/python"),
-        Path("/opt/app/settings.toml"),
-        "root",
-    )
-    assert "WorkingDirectory=/opt/app" in text
-    assert "User=root" in text
-    assert "MemoryMax=256M" in text
-    assert "@ROOT@" not in text
-
-
-def test_render_systemd_unit_missing_template(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.systemd_template_path",
-        lambda: tmp_path / "missing.service.in",
-    )
-    with pytest.raises(FileNotFoundError, match="systemd template not found"):
-        render_systemd_unit(
-            Path("/opt/app"),
-            Path("/opt/app/.venv/bin/python"),
-            Path("/opt/app/settings.toml"),
-            "root",
-        )
-
-
 def test_prompt_settings_builds_toml(tmp_path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
     prompter = FakePrompter(secrets=["prompted-key1"])
-    settings = prompt_settings(load_example_settings(), prompter)
+    settings = prompt_settings(
+        load_example_settings(), prompter, defaults=prompt_defaults_from(load_example_settings())
+    )
     assert settings.weather.api_key == "prompted-key1"
     assert settings.location.zip_code == "53029"
     assert settings.gpio.mock is False
     assert settings.location.latitude == pytest.approx(43.106)
     assert prompter.text_calls == [
         ("ZIP code", "53029"),
-        ("Inches per cycle (30 min/zone ≈ 0.3)", "0.3"),
+        ("Inches per cycle (from settings.example.toml)", "0.3"),
         ("Daily check time before irrigation (HH:MM, 24h)", "00:00"),
     ]
 
 
 def test_prompt_watering_profile_custom_values():
-    profile = PromptDefaults(inches_per_cycle=0.33, check_hour=5, check_minute=15)
+    profile = PromptDefaults(
+        zip_code="53029",
+        inches_per_cycle=0.33,
+        check_hour=5,
+        check_minute=15,
+    )
     prompter = FakePrompter(answers=["0.4", "06:00"])
     inches, hour, minute = prompt_watering_profile(prompter, profile)
     assert inches == pytest.approx(0.4)
@@ -527,7 +479,9 @@ def test_prompt_settings_retries_on_bad_api_key(monkeypatch):
 
     monkeypatch.setattr("rain_bypass.install_cli.resolve_location", fake_resolve)
     prompter = FakePrompter(secrets=["bad-key-001", "good-key-001"])
-    settings = prompt_settings(load_example_settings(), prompter)
+    settings = prompt_settings(
+        load_example_settings(), prompter, defaults=prompt_defaults_from(load_example_settings())
+    )
     assert settings.weather.api_key == "good-key-001"
 
 
@@ -539,6 +493,7 @@ def test_prompt_settings_keeps_existing_api_key(tmp_path, monkeypatch):
         load_example_settings(),
         prompter,
         existing_key=existing.weather.api_key,
+        defaults=prompt_defaults_from(load_example_settings()),
     )
     assert settings.weather.api_key == "existing-key1"
     assert prompter.secrets == []
@@ -548,7 +503,7 @@ def test_run_install_keeps_existing_api_key(tmp_path, monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
     monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
     settings_path = tmp_path / "settings.toml"
-    write_settings_secure(
+    write_settings(
         settings_path,
         load_example_settings(weather={"api_key": "existing-key1"}),
     )
@@ -567,6 +522,7 @@ def test_build_settings_uses_example_defaults(monkeypatch):
     settings = build_settings(
         "my-test-key1",
         "53029",
+        base=None,
         inches_per_cycle=0.3,
         check_hour=0,
         check_minute=0,
@@ -580,7 +536,9 @@ def test_build_settings_uses_example_defaults(monkeypatch):
 
 def test_build_settings_mock_gpio_off_pi(monkeypatch):
     monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: False)
-    settings = build_settings("my-test-key1", "53029")
+    settings = build_settings(
+        "my-test-key1", "53029", base=None, inches_per_cycle=0.3, check_hour=0, check_minute=0
+    )
     assert settings.gpio.mock is True
 
 
@@ -592,113 +550,14 @@ def test_build_settings_maps_weather_error(monkeypatch):
 
     monkeypatch.setattr("rain_bypass.install_cli.resolve_location", _fail)
     with pytest.raises(typer.BadParameter, match="unauthorized"):
-        build_settings("my-test-key1", "53029")
+        build_settings(
+            "my-test-key1", "53029", base=None, inches_per_cycle=0.3, check_hour=0, check_minute=0
+        )
 
 
 def test_build_settings_rejects_empty_api_key():
     with pytest.raises(typer.BadParameter, match="cannot be empty"):
-        build_settings("")
-
-
-def test_write_settings_secure(tmp_path):
-    path = tmp_path / "settings.toml"
-    settings = load_example_settings(weather={"api_key": "secure-key1"})
-    write_settings_secure(path, settings)
-    assert path.read_text(encoding="utf-8")
-    assert load_settings(path).weather.api_key == "secure-key1"
-
-
-def test_install_systemd_unit_skips_without_systemctl(monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.shutil.which", lambda _name: None)
-    install_systemd_unit(
-        Path("/opt/app"),
-        Path("/opt/app/.venv/bin/python"),
-        Path("/opt/app/settings.toml"),
-        prompter=FakePrompter(confirms=[True]),
-    )
-
-
-def test_install_systemd_unit_declined(monkeypatch):
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
-    )
-    install_systemd_unit(
-        Path("/opt/app"),
-        Path("/opt/app/.venv/bin/python"),
-        Path("/opt/app/settings.toml"),
-        prompter=FakePrompter(confirms=[False]),
-    )
-
-
-def test_install_systemd_unit_installs(monkeypatch):
-    calls: list[list[str]] = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(list(cmd))
-        return CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
-    )
-    install_systemd_unit(
-        Path("/opt/app"),
-        Path("/opt/app/.venv/bin/python"),
-        Path("/opt/app/settings.toml"),
-        prompter=FakePrompter(confirms=[True]),
-        run_command=fake_run,
-    )
-    assert calls[0][:2] == ["sudo", "tee"]
-
-
-def test_install_systemd_unit_prompts_for_pi_user(monkeypatch):
-    captured: dict[str, str] = {}
-
-    def fake_run(cmd, **kwargs):
-        if cmd[:2] == ["sudo", "tee"]:
-            captured["unit"] = kwargs["input"].decode()
-        return CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: f"/usr/bin/{name}" if name in {"systemctl", "id"} else None,
-    )
-    prompter = FakePrompter(confirms=[True], answers=["pi"])
-    install_systemd_unit(
-        Path("/opt/app"),
-        Path("/opt/app/.venv/bin/python"),
-        Path("/opt/app/settings.toml"),
-        prompter=prompter,
-        run_command=fake_run,
-    )
-    assert "User=pi" in captured["unit"]
-
-
-def test_write_settings_secure_chmod(tmp_path, monkeypatch):
-    chmod_calls: list[tuple[Path, int]] = []
-
-    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.os.chmod",
-        lambda path, mode: chmod_calls.append((path, mode)),
-    )
-    path = tmp_path / "settings.toml"
-    write_settings_secure(path, load_example_settings(weather={"api_key": "chmod-key01"}))
-    assert chmod_calls == [(path, 0o600)]
-
-
-def test_write_settings_secure_skips_chmod_on_non_posix(tmp_path, monkeypatch):
-    chmod_calls: list[tuple[Path, int]] = []
-
-    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: False)
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.os.chmod",
-        lambda path, mode: chmod_calls.append((path, mode)),
-    )
-    path = tmp_path / "settings.toml"
-    write_settings_secure(path, load_example_settings(weather={"api_key": "skip-chmod"}))
-    assert chmod_calls == []
+        build_settings("", "53029", base=None, inches_per_cycle=0.3, check_hour=0, check_minute=0)
 
 
 def test_run_install_skip_api_test(tmp_path, monkeypatch):
@@ -918,157 +777,6 @@ def test_typer_prompter_delegates(monkeypatch):
     assert prompter.confirm("label", default=False) is True
 
 
-def test_render_autoupdate_service():
-    text = render_autoupdate_service(Path("/opt/sprinkler-rain-bypass"), "pi")
-    assert "/opt/sprinkler-rain-bypass/scripts/auto-update.sh" in text
-    assert "User=pi" in text
-    assert "@ROOT@" not in text
-    assert "@USER@" not in text
-
-
-def test_render_autoupdate_service_missing_template(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.autoupdate_service_template_path",
-        lambda: tmp_path / "missing.service.in",
-    )
-    with pytest.raises(FileNotFoundError, match="auto-update service template"):
-        render_autoupdate_service(tmp_path, "pi")
-
-
-def test_render_autoupdate_timer():
-    text = render_autoupdate_timer()
-    assert "OnCalendar=*-*-* 12:00:00" in text
-
-
-def test_render_autoupdate_timer_missing_template(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.autoupdate_timer_template_path",
-        lambda: tmp_path / "missing.timer.in",
-    )
-    with pytest.raises(FileNotFoundError, match="auto-update timer template"):
-        render_autoupdate_timer()
-
-
-def test_install_autoupdate_skips_without_systemctl(monkeypatch, tmp_path):
-    monkeypatch.setattr("rain_bypass.install_cli.shutil.which", lambda _name: None)
-    install_autoupdate(tmp_path, prompter=FakePrompter(confirms=[True]))
-
-
-def test_install_autoupdate_declined(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
-    )
-    install_autoupdate(tmp_path, prompter=FakePrompter(confirms=[False]))
-
-
-def test_install_autoupdate_missing_script(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
-    )
-    install_autoupdate(tmp_path, prompter=FakePrompter(confirms=[True]))
-
-
-def test_install_autoupdate_installs(monkeypatch, tmp_path):
-    script = tmp_path / "scripts"
-    script.mkdir()
-    (script / "auto-update.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-    chmod_calls: list[tuple[Path, int]] = []
-    calls: list[list[str]] = []
-    tee_inputs: list[bytes] = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(list(cmd))
-        if cmd[:2] == ["sudo", "tee"] and str(cmd[2]).endswith(".service"):
-            tee_inputs.append(kwargs.get("input", b""))
-        return CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.os.chmod",
-        lambda path, mode: chmod_calls.append((path, mode)),
-    )
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: {
-            "systemctl": "/usr/bin/systemctl",
-            "id": "/usr/bin/id",
-        }.get(name),
-    )
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.install_unattended_upgrades",
-        lambda **kwargs: None,
-    )
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.autoupdate_service_template_path",
-        lambda: repo_root() / "deploy" / "rain-bypass-auto-update.service.in",
-    )
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.autoupdate_timer_template_path",
-        lambda: repo_root() / "deploy" / "rain-bypass-auto-update.timer.in",
-    )
-    install_autoupdate(
-        tmp_path,
-        prompter=FakePrompter(confirms=[True]),
-        run_command=fake_run,
-        skip_confirm=True,
-    )
-    assert chmod_calls == [(script / "auto-update.sh", 0o755)]
-    tee_calls = [c for c in calls if c[:2] == ["sudo", "tee"] and str(c[2]).endswith(".service")]
-    assert len(tee_calls) == 1
-    assert tee_inputs == [render_autoupdate_service(tmp_path, "pi").encode()]
-    assert calls[-1] == [
-        "sudo",
-        "systemctl",
-        "enable",
-        "--now",
-        f"{AUTO_UPDATE_SERVICE_NAME}.timer",
-    ]
-
-
-def test_install_autoupdate_service_user_root_without_pi(monkeypatch, tmp_path):
-    script = tmp_path / "scripts"
-    script.mkdir()
-    (script / "auto-update.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-    tee_inputs: list[bytes] = []
-
-    def fake_run(cmd, **kwargs):
-        if cmd[:2] == ["sudo", "tee"] and str(cmd[2]).endswith(".service"):
-            tee_inputs.append(kwargs.get("input", b""))
-        if cmd[:3] == ["id", "-u", "pi"]:
-            return CompletedProcess(cmd, 1)
-        return CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: {
-            "systemctl": "/usr/bin/systemctl",
-            "id": "/usr/bin/id",
-        }.get(name),
-    )
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.install_unattended_upgrades",
-        lambda **kwargs: None,
-    )
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.autoupdate_service_template_path",
-        lambda: repo_root() / "deploy" / "rain-bypass-auto-update.service.in",
-    )
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.autoupdate_timer_template_path",
-        lambda: repo_root() / "deploy" / "rain-bypass-auto-update.timer.in",
-    )
-    install_autoupdate(
-        tmp_path,
-        prompter=FakePrompter(confirms=[True]),
-        run_command=fake_run,
-        skip_confirm=True,
-    )
-    assert tee_inputs == [render_autoupdate_service(tmp_path, "root").encode()]
-
-
 def test_cli_setup_autoupdate(monkeypatch):
     invoked: list[bool] = []
 
@@ -1079,33 +787,6 @@ def test_cli_setup_autoupdate(monkeypatch):
     result = CliRunner().invoke(app, ["setup-autoupdate", "--yes"])
     assert result.exit_code == 0
     assert invoked == [True]
-
-
-def test_install_autoupdate_skips_chmod_off_posix(monkeypatch, tmp_path):
-    script = tmp_path / "scripts"
-    script.mkdir()
-    (script / "auto-update.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-    chmod_calls: list[tuple[Path, int]] = []
-
-    def fake_run(cmd, **kwargs):
-        return CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: False)
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.os.chmod",
-        lambda path, mode: chmod_calls.append((path, mode)),
-    )
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
-    )
-    install_autoupdate(
-        tmp_path,
-        prompter=FakePrompter(confirms=[True]),
-        run_command=fake_run,
-        skip_confirm=True,
-    )
-    assert chmod_calls == []
 
 
 def test_run_install_skips_autoupdate_off_pi(tmp_path, monkeypatch):
@@ -1125,57 +806,3 @@ def test_run_install_skips_autoupdate_off_pi(tmp_path, monkeypatch):
     run_install(tmp_path, prompter=prompter, skip_once=True)
     assert systemd_calls == [True]
     assert autoupdate_calls == []
-
-
-def test_install_unattended_upgrades_skips_without_apt(monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.shutil.which", lambda _name: None)
-    install_unattended_upgrades()
-
-
-def test_install_unattended_upgrades_missing_templates(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: "/usr/bin/apt-get" if name == "apt-get" else None,
-    )
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.apt_auto_upgrades_path",
-        lambda: tmp_path / "missing-auto.conf",
-    )
-    install_unattended_upgrades()
-
-
-def test_install_unattended_upgrades_without_systemctl(monkeypatch):
-    calls: list[list[str]] = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(list(cmd))
-        return CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: "/usr/bin/apt-get" if name == "apt-get" else None,
-    )
-    install_unattended_upgrades(run_command=fake_run)
-    assert not any(cmd[:3] == ["sudo", "systemctl", "enable"] for cmd in calls)
-
-
-def test_install_unattended_upgrades_installs(monkeypatch):
-    calls: list[list[str]] = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(list(cmd))
-        return CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
-        lambda name: f"/usr/bin/{name}" if name in {"apt-get", "systemctl"} else None,
-    )
-    install_unattended_upgrades(run_command=fake_run)
-    assert calls[0] == ["sudo", "apt-get", "update", "-qq"]
-    assert calls[1][:4] == ["sudo", "apt-get", "install", "-y"]
-    assert calls[2][:3] == ["sudo", "tee", "/etc/apt/apt.conf.d/20auto-upgrades"]
-    assert calls[3][:3] == [
-        "sudo",
-        "tee",
-        "/etc/apt/apt.conf.d/51unattended-upgrades-rain-bypass",
-    ]

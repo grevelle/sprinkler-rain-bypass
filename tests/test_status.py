@@ -66,22 +66,23 @@ def test_relay_label_block() -> None:
 def test_gather_status_sewer_lockout(settings, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 2, 1))
     snap = gather_status(settings, State(), fetch_live=False)
-    assert snap.sewer_lockout is True
-    assert snap.would_water is False
+    assert snap.preview.sewer_lockout is True
+    assert snap.preview.would_water is False
 
 
 def test_gather_status_live_weather(settings, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
     monkeypatch.setattr(
-        "rain_bypass.status.fetch_weather",
+        "rain_bypass.logic.fetch_weather",
         lambda _s: _snapshot(rain_mtd=0.0, forecast=0.0),
     )
     snap = gather_status(settings, State(), fetch_live=True)
-    assert snap.live is not None
-    assert snap.balance_ok is True
-    assert snap.safety_ok is True
-    assert snap.would_water is True
-    assert snap.monthly_target == pytest.approx(5.0)
+    assert snap.preview.live is not None
+    assert snap.preview.evaluation is not None
+    assert snap.preview.evaluation.balance_ok is True
+    assert snap.preview.evaluation.safety_ok is True
+    assert snap.preview.would_water is True
+    assert snap.preview.evaluation.monthly_target == pytest.approx(5.0)
 
 
 def test_gather_status_weather_error(settings, monkeypatch) -> None:
@@ -92,19 +93,19 @@ def test_gather_status_weather_error(settings, monkeypatch) -> None:
 
         raise WeatherError("api down")
 
-    monkeypatch.setattr("rain_bypass.status.fetch_weather", _fail)
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", _fail)
     snap = gather_status(settings, State(), fetch_live=True)
-    assert snap.live is None
-    assert snap.live_error == "api down"
-    assert snap.would_water is None
+    assert snap.preview.live is None
+    assert snap.preview.live_error == "api down"
+    assert snap.preview.would_water is None
 
 
 def test_gather_status_cached_uses_saved_decision(settings, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
     state = State(watering_required=False)
     snap = gather_status(settings, state, fetch_live=False)
-    assert snap.would_water is False
-    assert snap.live is None
+    assert snap.preview.would_water is False
+    assert snap.preview.live is None
 
 
 def test_format_status_sections(settings, monkeypatch) -> None:
@@ -113,7 +114,7 @@ def test_format_status_sections(settings, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 3600.0)
     monkeypatch.setattr(
-        "rain_bypass.status.fetch_weather",
+        "rain_bypass.logic.fetch_weather",
         lambda _s: _snapshot(rain_mtd=1.0, forecast=0.2, max_daily=0.1),
     )
     state = State(
@@ -175,7 +176,7 @@ def test_format_status_weather_error(settings, monkeypatch) -> None:
 
         raise WeatherError("api down")
 
-    monkeypatch.setattr("rain_bypass.status.fetch_weather", _fail)
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", _fail)
     text = format_status(gather_status(settings, State(), fetch_live=True))
     assert "error — api down" in text
     assert "unknown (need live weather or a completed cycle)" in text
@@ -187,7 +188,7 @@ def test_format_status_freeze_block(settings, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
     monkeypatch.setattr(
-        "rain_bypass.status.fetch_weather",
+        "rain_bypass.logic.fetch_weather",
         lambda _s: _snapshot(rain_mtd=0.0, freeze_block=True),
     )
     text = format_status(gather_status(settings, State(), fetch_live=True))
@@ -203,7 +204,7 @@ def test_format_status_block_verdict(settings, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
     monkeypatch.setattr(
-        "rain_bypass.status.fetch_weather",
+        "rain_bypass.logic.fetch_weather",
         lambda _s: _snapshot(rain_mtd=10.0, forecast=0.0),
     )
     text = format_status(gather_status(settings, State(), fetch_live=True))
@@ -213,7 +214,7 @@ def test_format_status_block_verdict(settings, monkeypatch) -> None:
 def test_print_status_cli(settings_path, monkeypatch) -> None:
     monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
     monkeypatch.setattr(
-        "rain_bypass.status.fetch_weather",
+        "rain_bypass.logic.fetch_weather",
         lambda _s: _snapshot(rain_mtd=0.0),
     )
     result = CliRunner().invoke(app, ["status", "--config", str(settings_path)])

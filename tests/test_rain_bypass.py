@@ -238,8 +238,9 @@ def test_decide_allows_when_balance_and_safety_ok(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0, 0.0, 0.0))
     decision = decide(settings, State())
     assert decision.watering_required is True
-    assert decision.balance_ok is True
-    assert decision.rain_mtd == pytest.approx(0.0)
+    assert decision.evaluation is not None
+    assert decision.evaluation.balance_ok is True
+    assert decision.evaluation.rain_mtd == pytest.approx(0.0)
     assert decision.irrigation_inches_mtd == pytest.approx(0.3)
 
 
@@ -252,7 +253,8 @@ def test_decide_blocks_when_forecast_fills_deficit(settings, monkeypatch):
     )
     decision = decide(settings, State())
     assert decision.watering_required is False
-    assert decision.balance_ok is False
+    assert decision.evaluation is not None
+    assert decision.evaluation.balance_ok is False
 
 
 def test_decide_blocks_on_storm_event(settings, monkeypatch):
@@ -260,7 +262,8 @@ def test_decide_blocks_on_storm_event(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0, 0.0, 0.25))
     decision = decide(settings, State())
     assert decision.watering_required is False
-    assert decision.balance_ok is True
+    assert decision.evaluation is not None
+    assert decision.evaluation.balance_ok is True
 
 
 def test_decide_blocks_in_dormant_month(settings, monkeypatch):
@@ -268,7 +271,8 @@ def test_decide_blocks_in_dormant_month(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0, 0.0, 0.0))
     decision = decide(settings, State())
     assert decision.watering_required is False
-    assert decision.balance_ok is False
+    assert decision.evaluation is not None
+    assert decision.evaluation.balance_ok is False
 
 
 def test_decide_blocks_on_freeze(settings, monkeypatch, caplog):
@@ -328,7 +332,7 @@ def test_decide_sewer_lockout_blocks(settings, monkeypatch, caplog):
     with caplog.at_level("INFO"):
         decision = decide(settings, State())
     assert decision.watering_required is False
-    assert decision.rain_mtd is None
+    assert decision.evaluation is None
     assert "sewer lockout" in caplog.text
 
 
@@ -354,6 +358,21 @@ def test_fail_safe(settings, monkeypatch):
     monkeypatch.setattr("rain_bypass.logic.fetch_weather", _weather_error)
     decision = decide(settings, State())
     assert decision.watering_required is False
+
+
+def test_tick_preserves_rainfall_on_weather_error(settings, tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    settings = settings.model_copy(
+        update={
+            "runtime": settings.runtime.model_copy(update={"state_path": state_path}),
+        }
+    )
+    state = State(rainfall_inches=0.42, forecast_inches=0.11)
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", _weather_error)
+    saved = tick(settings, state, lambda _required: None)
+    assert saved.rainfall_inches == pytest.approx(0.42)
+    assert saved.forecast_inches == pytest.approx(0.11)
+    assert saved.last_error == "x"
 
 
 def test_tick_persists_balance_state(settings, tmp_path, monkeypatch):

@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+from collections.abc import Mapping
 from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 from zoneinfo import ZoneInfo
 
+import tomli_w
 import tomllib
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from rain_bypass.paths import repo_root
+
+M = TypeVar("M", bound=BaseModel)
+
+EXAMPLE_SETTINGS_PATH = repo_root() / "settings.example.toml"
 
 DEFAULT_MONTHLY_TARGETS: dict[int, float] = {
     1: 0.0,
@@ -189,3 +198,51 @@ def load_settings(config_path: Path | str) -> Settings:
         return Settings.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
+
+
+def validate_model(model: type[M], data: object) -> M:
+    try:
+        return model.model_validate(data)
+    except ValidationError as exc:
+        raise ConfigError(str(exc.errors()[0]["msg"])) from None
+
+
+def _deep_merge(base: dict[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+    for key, value in patch.items():
+        existing = base.get(key)
+        if isinstance(value, Mapping) and isinstance(existing, dict):
+            _deep_merge(
+                cast(dict[str, Any], existing),
+                cast(Mapping[str, Any], value),
+            )
+        else:
+            base[key] = value
+    return base
+
+
+def _load_example_data(**sections: Mapping[str, Any]) -> dict[str, Any]:
+    if not EXAMPLE_SETTINGS_PATH.is_file():
+        raise FileNotFoundError(f"Example settings not found: {EXAMPLE_SETTINGS_PATH}")
+    with EXAMPLE_SETTINGS_PATH.open("rb") as handle:
+        data = tomllib.load(handle)
+    return _deep_merge(data, sections)
+
+
+def load_example_settings(**sections: Mapping[str, Any]) -> Settings:
+    return Settings.model_validate(_load_example_data(**sections))
+
+
+def settings_to_toml_dict(settings: Settings) -> dict[str, Any]:
+    data = settings.model_dump()
+    data["runtime"]["state_path"] = str(settings.runtime.state_path)
+    balance = dict(data["balance"])
+    balance.pop("monthly", None)
+    data["balance"] = balance
+    return data
+
+
+def write_settings(path: Path | str, settings: Settings) -> None:
+    target = Path(path)
+    target.write_text(tomli_w.dumps(settings_to_toml_dict(settings)), encoding="utf-8")
+    if os.name == "posix":
+        os.chmod(target, 0o600)

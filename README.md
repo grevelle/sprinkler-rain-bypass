@@ -6,25 +6,28 @@ Raspberry Pi controller that sets a rain-bypass relay **ON or OFF** before each 
 
 Get a free API key at [Visual Crossing](https://www.visualcrossing.com/weather-api).
 
-## Setup
+## Quick Start
 
-On a **Raspberry Pi Zero W**, use the **latest Raspberry Pi OS** (32-bit is fine). Run the interactive installer — it checks for missing apt packages (venv, git, build tools on the Pi), applies defaults from `settings.example.toml`, resolves your **ZIP code** to coordinates (default **53029**), and only requires your Visual Crossing **API key** (press Enter everywhere else). Full command list: [Command reference](#command-reference).
+On a **Raspberry Pi Zero W**, use the **latest Raspberry Pi OS** (32-bit is fine). Run the interactive installer — it checks for missing apt packages (venv, git, build tools on the Pi), applies defaults from `settings.example.toml`, resolves your **ZIP code** to coordinates, and only requires your Visual Crossing **API key** (press Enter everywhere else). Full command list: [Command reference](#command-reference).
 
 ```bash
 git clone https://github.com/grevelle/sprinkler-rain-bypass.git
 cd sprinkler-rain-bypass
-chmod +x install.sh
+chmod +x install.sh configure.sh
 ./install.sh
 ```
 
-Manual setup (or development off the Pi):
+Manual setup (development off the Pi or without the shell wrappers):
 
 ```bash
-pip install -e ".[dev,gpio]"    # use [gpio] on the Pi
-cp settings.example.toml settings.toml   # edit api_key (and zip_code if not 53029)
+python3 -m venv .venv
+.venv/bin/pip install -e ".[gpio]"          # Pi
+pip install -e ".[dev,gpio]"                  # dev machine
+cp settings.example.toml settings.toml
+.venv/bin/python -m rain_bypass.install_cli  # same wizard as ./install.sh
 ```
 
-`settings.example.toml` is the canonical default config. Tests and `rain_bypass.settings_io` derive settings from it. Run `./install.sh` (or `rain-bypass-install`) for the interactive setup wizard.
+`settings.example.toml` is the canonical default config. Tests and `rain_bypass.config` derive settings from it. Run `./install.sh` (or `rain-bypass-install`) for the interactive setup wizard.
 
 **Change API key, ZIP, inches per cycle, or check time** — `./configure.sh` (see [Configure](#configure-api-key-zip-inchescycle-check-time)).
 
@@ -59,25 +62,6 @@ rain-bypass status
 ```
 
 Below, Pi examples use `cd ~/sprinkler-rain-bypass` where needed. Off-Pi dev commands assume you are already in the cloned repo.
-
-### First-time setup
-
-```bash
-git clone https://github.com/grevelle/sprinkler-rain-bypass.git
-cd sprinkler-rain-bypass
-chmod +x install.sh configure.sh
-./install.sh
-```
-
-Manual / dev setup (off the Pi or without the shell wrappers):
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -e ".[gpio]"          # Pi
-pip install -e ".[dev,gpio]"                # dev machine
-cp settings.example.toml settings.toml
-.venv/bin/python -m rain_bypass.install_cli  # same wizard as ./install.sh
-```
 
 ### Configure (API key, ZIP, inches/cycle, check time)
 
@@ -374,7 +358,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and migration notes (e.g. v
 
 ## Code
 
-Layered modules: `config`, `balance`, `settings_io`, `windows`, `weather` (httpx), `logic`, `controller`, `gpio`, `status`, `cli`, and `install_cli`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs pre-commit, Pyright (strict), and pytest at 100% coverage on the latest Python 3.x.
+Layered modules: `paths`, `config`, `balance`, `windows`, `weather` (httpx), `logic` (`preview`, `evaluate_weather`), `controller`, `gpio`, `status`, `cli`, `install_cli`, and `deploy`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs pre-commit, Pyright (strict), and pytest at 100% coverage on the latest Python 3.x.
 
 ## Development
 

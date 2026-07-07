@@ -4,8 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rain_bypass.config import Gpio, load_settings
-from rain_bypass.settings_io import load_example_settings, write_settings
+from rain_bypass.config import Gpio, load_example_settings, load_settings, write_settings
 
 TEST_SETTINGS_OVERRIDES = {
     "weather": {"api_key": "test-key"},

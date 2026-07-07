@@ -8,22 +8,37 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Protocol
+from typing import Annotated, Protocol, TypeVar
 
 import typer
+from pydantic import BaseModel
 
-from rain_bypass.config import Location, Settings, load_settings
+from rain_bypass.config import (
+    Balance,
+    ConfigError,
+    Location,
+    Settings,
+    Watering,
+    load_example_settings,
+    load_settings,
+    validate_model,
+    write_settings,
+)
 from rain_bypass.controller import run
+from rain_bypass.deploy import (
+    SERVICE_NAME,
+    install_autoupdate,
+    install_systemd_unit,
+)
 from rain_bypass.exceptions import WeatherError
 from rain_bypass.logging_setup import configure_logging
+from rain_bypass.paths import repo_root
 from rain_bypass.platform import is_pi_zero, is_raspberry_pi
-from rain_bypass.settings_io import load_example_settings, write_settings
 from rain_bypass.weather import resolve_location, weather_api_smoke
 
 RunCommand = Callable[..., subprocess.CompletedProcess[bytes]]
+M = TypeVar("M", bound=BaseModel)
 
-SERVICE_NAME = "rain-bypass"
-AUTO_UPDATE_SERVICE_NAME = "rain-bypass-auto-update"
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,
@@ -33,10 +48,10 @@ app = typer.Typer(
 
 @dataclass(frozen=True, slots=True)
 class PromptDefaults:
-    zip_code: str = "53029"
-    inches_per_cycle: float = 0.3
-    check_hour: int = 0
-    check_minute: int = 0
+    zip_code: str
+    inches_per_cycle: float
+    check_hour: int
+    check_minute: int
 
 
 class Prompter(Protocol):
@@ -59,41 +74,11 @@ class TyperPrompter:
         return typer.prompt(label, hide_input=True)
 
 
-def repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
-def systemd_template_path() -> Path:
-    return repo_root() / "deploy" / "rain-bypass.service.in"
-
-
-def autoupdate_service_template_path() -> Path:
-    return repo_root() / "deploy" / "rain-bypass-auto-update.service.in"
-
-
-def autoupdate_timer_template_path() -> Path:
-    return repo_root() / "deploy" / "rain-bypass-auto-update.timer.in"
-
-
-def apt_auto_upgrades_path() -> Path:
-    return repo_root() / "deploy" / "apt-20auto-upgrades.conf"
-
-
-def apt_unattended_local_path() -> Path:
-    return repo_root() / "deploy" / "apt-51unattended-upgrades-local.conf"
-
-
-def render_systemd_unit(root: Path, python: Path, settings: Path, service_user: str) -> str:
-    template = systemd_template_path()
-    if not template.is_file():
-        raise FileNotFoundError(f"systemd template not found: {template}")
-    text = template.read_text(encoding="utf-8")
-    return (
-        text.replace("@ROOT@", root.as_posix())
-        .replace("@PYTHON@", python.as_posix())
-        .replace("@SETTINGS@", settings.as_posix())
-        .replace("@USER@", service_user)
-    )
+def _prompt_field(model: type[M], data: object) -> M:
+    try:
+        return validate_model(model, data)
+    except ConfigError as exc:
+        raise typer.BadParameter(str(exc)) from None
 
 
 def validate_api_key(key: str) -> str:
@@ -109,34 +94,36 @@ def validate_api_key(key: str) -> str:
     return text
 
 
-def validate_zip_code(value: str) -> str:
-    text = value.strip()
-    if not re.fullmatch(r"\d{5}(?:-\d{4})?", text):
-        raise typer.BadParameter("ZIP code must be 5 digits or ZIP+4.")
-    return text[:5]
+def parse_zip_code(value: str) -> str:
+    return _prompt_field(
+        Location,
+        {"zip_code": value.strip(), "latitude": 0, "longitude": 0, "timezone": "UTC"},
+    ).zip_code
 
 
-def validate_inches_per_cycle(value: str) -> float:
-    text = value.strip()
-    try:
-        inches = float(text)
-    except ValueError as exc:
-        raise typer.BadParameter("Inches per cycle must be a number.") from exc
-    if inches <= 0:
-        raise typer.BadParameter("Inches per cycle must be greater than 0.")
-    return inches
+def parse_inches_per_cycle(value: str) -> float:
+    return _prompt_field(Balance, {"inches_per_cycle": value.strip()}).inches_per_cycle
 
 
-def validate_check_time(value: str) -> tuple[int, int]:
+def parse_check_time(value: str) -> tuple[int, int]:
     text = value.strip()
     match = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
     if not match:
         raise typer.BadParameter("Check time must be HH:MM in 24-hour format (e.g. 00:00).")
-    hour = int(match.group(1))
-    minute = int(match.group(2))
-    if hour > 23 or minute > 59:
-        raise typer.BadParameter("Check time hour must be 0-23 and minute 0-59.")
-    return hour, minute
+    watering = _prompt_field(
+        Watering,
+        {"check_hour": int(match.group(1)), "check_minute": int(match.group(2))},
+    )
+    return watering.check_hour, watering.check_minute
+
+
+def prompt_defaults_from(settings: Settings) -> PromptDefaults:
+    return PromptDefaults(
+        zip_code=settings.location.zip_code,
+        inches_per_cycle=settings.balance.inches_per_cycle,
+        check_hour=settings.watering.check_hour,
+        check_minute=settings.watering.check_minute,
+    )
 
 
 def load_settings_base(settings_path: Path) -> Settings:
@@ -149,23 +136,14 @@ def load_settings_base(settings_path: Path) -> Settings:
 
 
 def load_prompt_defaults(settings_path: Path) -> tuple[str | None, PromptDefaults]:
-    if not settings_path.is_file():
-        return None, PromptDefaults()
-    try:
-        existing = load_settings(settings_path)
-        return existing.weather.api_key, PromptDefaults(
-            zip_code=existing.location.zip_code,
-            inches_per_cycle=existing.balance.inches_per_cycle,
-            check_hour=existing.watering.check_hour,
-            check_minute=existing.watering.check_minute,
-        )
-    except Exception:
-        return None, PromptDefaults()
-
-
-def load_existing_settings_fields(settings_path: Path) -> tuple[str | None, str]:
-    key, profile = load_prompt_defaults(settings_path)
-    return key, profile.zip_code
+    base = load_settings_base(settings_path)
+    key: str | None = None
+    if settings_path.is_file():
+        try:
+            key = load_settings(settings_path).weather.api_key
+        except Exception:
+            pass
+    return key, prompt_defaults_from(base)
 
 
 def apply_prompt_overrides(
@@ -193,16 +171,16 @@ def apply_prompt_overrides(
 
 def build_settings(
     api_key: str,
-    zip_code: str = "53029",
+    zip_code: str,
     *,
-    base: Settings | None = None,
-    inches_per_cycle: float = 0.3,
-    check_hour: int = 0,
-    check_minute: int = 0,
+    base: Settings | None,
+    inches_per_cycle: float,
+    check_hour: int,
+    check_minute: int,
     gpio_mock: bool | None = None,
 ) -> Settings:
     key = validate_api_key(api_key)
-    zip5 = validate_zip_code(zip_code)
+    zip5 = parse_zip_code(zip_code)
     mock = not is_raspberry_pi() if gpio_mock is None else gpio_mock
     try:
         location = resolve_location(zip5, key)
@@ -224,13 +202,13 @@ def prompt_watering_profile(prompter: Prompter, defaults: PromptDefaults) -> tup
     typer.echo(
         "\n==> Sprinkler program — one daily run; calibrate inches per cycle with catch cups later if needed."
     )
-    inches = validate_inches_per_cycle(
+    inches = parse_inches_per_cycle(
         prompter.text(
-            "Inches per cycle (30 min/zone ≈ 0.3)",
+            "Inches per cycle (from settings.example.toml)",
             default=f"{defaults.inches_per_cycle:g}",
         )
     )
-    check_hour, check_minute = validate_check_time(
+    check_hour, check_minute = parse_check_time(
         prompter.text(
             "Daily check time before irrigation (HH:MM, 24h)",
             default=f"{defaults.check_hour:02d}:{defaults.check_minute:02d}",
@@ -244,9 +222,8 @@ def prompt_settings(
     prompter: Prompter,
     *,
     existing_key: str | None = None,
-    defaults: PromptDefaults | None = None,
+    defaults: PromptDefaults,
 ) -> Settings:
-    profile = defaults or PromptDefaults()
     typer.echo(
         "\n==> Press Enter for defaults from your existing settings or settings.example.toml.\n"
     )
@@ -258,14 +235,14 @@ def prompt_settings(
             api_key = existing_key
         else:
             api_key = prompter.secret("Visual Crossing API key")
-        zip_code = prompter.text("ZIP code", default=profile.zip_code)
+        zip_code = prompter.text("ZIP code", default=defaults.zip_code)
         if not is_raspberry_pi():
             typer.secho(
                 "warning: Raspberry Pi not detected; gpio.mock=true for this machine.",
                 fg=typer.colors.YELLOW,
             )
         try:
-            inches, check_hour, check_minute = prompt_watering_profile(prompter, profile)
+            inches, check_hour, check_minute = prompt_watering_profile(prompter, defaults)
             return build_settings(
                 api_key,
                 zip_code,
@@ -282,12 +259,6 @@ def prompt_settings(
 
 def _is_posix() -> bool:
     return os.name == "posix"
-
-
-def write_settings_secure(path: Path, settings: Settings) -> None:
-    write_settings(path, settings)
-    if _is_posix():
-        os.chmod(path, 0o600)
 
 
 def resolve_state_path(install_root: Path, settings: Settings) -> Path:
@@ -325,7 +296,7 @@ def ensure_state_writable(
 
 
 def write_and_validate_settings(settings_path: Path, settings: Settings) -> None:
-    write_settings_secure(settings_path, settings)
+    write_settings(settings_path, settings)
     typer.echo(f"==> Wrote {settings_path}")
     typer.echo("==> Validating settings.toml")
     load_settings(settings_path)
@@ -404,161 +375,6 @@ def run_configure(
     typer.echo("  Other settings: nano settings.toml (then restart the service)")
 
 
-def render_autoupdate_service(root: Path, service_user: str) -> str:
-    template = autoupdate_service_template_path()
-    if not template.is_file():
-        raise FileNotFoundError(f"auto-update service template not found: {template}")
-    return (
-        template.read_text(encoding="utf-8")
-        .replace("@ROOT@", root.as_posix())
-        .replace("@USER@", service_user)
-    )
-
-
-def render_autoupdate_timer() -> str:
-    template = autoupdate_timer_template_path()
-    if not template.is_file():
-        raise FileNotFoundError(f"auto-update timer template not found: {template}")
-    return template.read_text(encoding="utf-8")
-
-
-def install_unattended_upgrades(*, run_command: RunCommand | None = None) -> None:
-    """Enable Debian/Raspbian unattended-upgrades (apt-daily / apt-daily-upgrade timers)."""
-    runner: RunCommand = run_command or subprocess.run
-    if shutil.which("apt-get") is None:
-        typer.secho(
-            "warning: apt-get not found; skipping unattended-upgrades.",
-            fg=typer.colors.YELLOW,
-        )
-        return
-
-    auto_conf = apt_auto_upgrades_path()
-    local_conf = apt_unattended_local_path()
-    if not auto_conf.is_file() or not local_conf.is_file():
-        typer.secho(
-            "warning: unattended-upgrades config templates missing; skipping OS auto-update.",
-            fg=typer.colors.YELLOW,
-        )
-        return
-
-    typer.echo("==> Installing unattended-upgrades (automatic OS package updates)")
-    runner(["sudo", "apt-get", "update", "-qq"], check=True)
-    runner(
-        ["sudo", "apt-get", "install", "-y", "-qq", "unattended-upgrades"],
-        check=True,
-    )
-    runner(
-        ["sudo", "tee", "/etc/apt/apt.conf.d/20auto-upgrades"],
-        input=auto_conf.read_bytes(),
-        check=True,
-    )
-    runner(
-        ["sudo", "tee", "/etc/apt/apt.conf.d/51unattended-upgrades-rain-bypass"],
-        input=local_conf.read_bytes(),
-        check=True,
-    )
-    if shutil.which("systemctl") is not None:
-        runner(["sudo", "systemctl", "enable", "--now", "apt-daily.timer"], check=False)
-        runner(["sudo", "systemctl", "enable", "--now", "apt-daily-upgrade.timer"], check=False)
-    typer.echo(
-        "==> OS auto-update enabled (apt-daily.timer + apt-daily-upgrade.timer / unattended-upgrades)"
-    )
-
-
-def install_autoupdate(
-    root: Path,
-    *,
-    prompter: Prompter,
-    run_command: RunCommand | None = None,
-    skip_confirm: bool = False,
-) -> None:
-    runner: RunCommand = run_command or subprocess.run
-    if shutil.which("systemctl") is None:
-        typer.secho(
-            "warning: systemctl not found; skipping auto-update timer.", fg=typer.colors.YELLOW
-        )
-        return
-    if not skip_confirm and not prompter.confirm(
-        "Enable daily automatic OS and application updates (12:00)?",
-        default=True,
-    ):
-        return
-
-    auto_script = root / "scripts" / "auto-update.sh"
-    if not auto_script.is_file():
-        typer.secho(
-            f"warning: {auto_script} not found; skipping auto-update timer.",
-            fg=typer.colors.YELLOW,
-        )
-        return
-    if _is_posix():
-        os.chmod(auto_script, 0o755)
-
-    install_unattended_upgrades(run_command=runner)
-
-    service_user = "root"
-    if shutil.which("id") and runner(["id", "-u", "pi"], check=False).returncode == 0:
-        service_user = "pi"
-
-    service_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.service")
-    timer_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.timer")
-    typer.echo(f"==> Installing {service_path} and {timer_path} (requires sudo)")
-    runner(
-        ["sudo", "tee", str(service_path)],
-        input=render_autoupdate_service(root, service_user).encode(),
-        check=True,
-    )
-    runner(
-        ["sudo", "tee", str(timer_path)],
-        input=render_autoupdate_timer().encode(),
-        check=True,
-    )
-    runner(["sudo", "systemctl", "daemon-reload"], check=True)
-    runner(
-        ["sudo", "systemctl", "enable", "--now", f"{AUTO_UPDATE_SERVICE_NAME}.timer"], check=True
-    )
-    typer.echo(
-        f"==> Auto-update enabled. Status: sudo systemctl list-timers {AUTO_UPDATE_SERVICE_NAME}.timer"
-    )
-
-
-def install_systemd_unit(
-    root: Path,
-    python: Path,
-    settings: Path,
-    *,
-    prompter: Prompter,
-    run_command: RunCommand | None = None,
-) -> None:
-    runner: RunCommand = run_command or subprocess.run
-    if shutil.which("systemctl") is None:
-        typer.secho(
-            "warning: systemctl not found; skipping service install.", fg=typer.colors.YELLOW
-        )
-        return
-    if not prompter.confirm(f"Install and enable systemd service ({SERVICE_NAME})?", default=True):
-        return
-
-    service_user = "root"
-    if shutil.which("id") and runner(["id", "-u", "pi"], check=False).returncode == 0:
-        service_user = prompter.text(
-            "Service user (needs GPIO access on Pi; root is safest)",
-            default="root",
-        )
-
-    unit_path = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
-    typer.echo(f"==> Installing {unit_path} (requires sudo)")
-    runner(
-        ["sudo", "tee", str(unit_path)],
-        input=render_systemd_unit(root, python, settings, service_user).encode(),
-        check=True,
-    )
-    runner(["sudo", "systemctl", "daemon-reload"], check=True)
-    runner(["sudo", "systemctl", "enable", SERVICE_NAME], check=True)
-    runner(["sudo", "systemctl", "restart", SERVICE_NAME], check=True)
-    typer.echo(f"==> Service enabled. Status: sudo systemctl status {SERVICE_NAME}")
-
-
 def run_install(
     root: Path | None = None,
     *,
@@ -572,12 +388,11 @@ def run_install(
     settings_path = install_root / "settings.toml"
     python = install_root / ".venv" / "bin" / "python"
     prompts = prompter or TyperPrompter()
+    example = load_example_settings()
 
     typer.echo("Sprinkler Rain Bypass — installer")
     typer.echo(f"Install directory: {install_root}")
-    typer.echo(
-        "Press Enter for defaults except your API key (ZIP 53029, 0.3 in/cycle, midnight check).\n"
-    )
+    typer.echo("Press Enter for defaults from settings.example.toml except your API key.\n")
     if is_pi_zero():
         typer.secho(
             "Pi Zero detected — first pip install can take 10–20 minutes on a slow SD card.",
@@ -587,7 +402,7 @@ def run_install(
     existing_key, profile = load_prompt_defaults(settings_path)
 
     settings = prompt_settings(
-        load_example_settings(),
+        example,
         prompts,
         existing_key=existing_key,
         defaults=profile,

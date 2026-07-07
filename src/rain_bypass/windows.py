@@ -4,11 +4,8 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from rain_bypass import config
+from rain_bypass.balance import month_start
 from rain_bypass.config import Location, Settings
-
-
-def month_start(today: date) -> date:
-    return today.replace(day=1)
 
 
 def event_lookback_window(settings: Settings) -> tuple[date, date]:

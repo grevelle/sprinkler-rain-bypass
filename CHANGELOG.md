@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Internal refactor: `Evaluation`/`Preview` types and `preview()` API consolidate watering decisions; `settings_io` merged into `config`; deploy plumbing extracted to `deploy.py`; installer defaults derived from `settings.example.toml`. No user-facing behavior change.
+
 ### Removed
 
 - `scripts/check_30day_rain.py` — redundant with `pytest -m live`; imported private weather internals and had no tests.

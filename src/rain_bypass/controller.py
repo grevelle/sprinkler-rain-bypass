@@ -14,12 +14,22 @@ logger = logging.getLogger(__name__)
 def tick(settings: Settings, state: State, apply: Callable[[bool], None]) -> State:
     decision = decide(settings, state)
     apply(decision.watering_required)
+    evaluation = decision.evaluation
+    if evaluation is not None:
+        rainfall_inches = evaluation.rain_mtd
+        forecast_inches = evaluation.forecast_inches
+    elif decision.error is not None:
+        rainfall_inches = state.rainfall_inches
+        forecast_inches = state.forecast_inches
+    else:
+        rainfall_inches = None
+        forecast_inches = None
     updated = state.model_copy(
         update={
             "last_weather_update": time.time(),
             "watering_required": decision.watering_required,
-            "rainfall_inches": decision.rain_mtd,
-            "forecast_inches": decision.forecast_inches,
+            "rainfall_inches": rainfall_inches,
+            "forecast_inches": forecast_inches,
             "balance_month": (
                 decision.balance_month
                 if decision.balance_month is not None
