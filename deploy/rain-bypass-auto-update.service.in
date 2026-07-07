@@ -1,4 +1,4 @@
-# Template — placeholder @ROOT@ filled by rain-bypass-install.
+# Template — placeholders @ROOT@ @USER@ filled by rain-bypass-install.
 [Unit]
 Description=Daily auto-update for Sprinkler Rain Bypass (git pull, pip, service restart)
 After=network-online.target
@@ -6,6 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+User=@USER@
 WorkingDirectory=@ROOT@
 ExecStart=@ROOT@/scripts/auto-update.sh
 Nice=10

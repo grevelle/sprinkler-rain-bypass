@@ -919,9 +919,11 @@ def test_typer_prompter_delegates(monkeypatch):
 
 
 def test_render_autoupdate_service():
-    text = render_autoupdate_service(Path("/opt/sprinkler-rain-bypass"))
+    text = render_autoupdate_service(Path("/opt/sprinkler-rain-bypass"), "pi")
     assert "/opt/sprinkler-rain-bypass/scripts/auto-update.sh" in text
+    assert "User=pi" in text
     assert "@ROOT@" not in text
+    assert "@USER@" not in text
 
 
 def test_render_autoupdate_service_missing_template(monkeypatch, tmp_path):
@@ -930,7 +932,7 @@ def test_render_autoupdate_service_missing_template(monkeypatch, tmp_path):
         lambda: tmp_path / "missing.service.in",
     )
     with pytest.raises(FileNotFoundError, match="auto-update service template"):
-        render_autoupdate_service(tmp_path)
+        render_autoupdate_service(tmp_path, "pi")
 
 
 def test_render_autoupdate_timer():
@@ -974,9 +976,12 @@ def test_install_autoupdate_installs(monkeypatch, tmp_path):
     (script / "auto-update.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     chmod_calls: list[tuple[Path, int]] = []
     calls: list[list[str]] = []
+    tee_inputs: list[bytes] = []
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
+        if cmd[:2] == ["sudo", "tee"] and str(cmd[2]).endswith(".service"):
+            tee_inputs.append(kwargs.get("input", b""))
         return CompletedProcess(cmd, 0)
 
     monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
@@ -986,7 +991,10 @@ def test_install_autoupdate_installs(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "rain_bypass.install_cli.shutil.which",
-        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+        lambda name: {
+            "systemctl": "/usr/bin/systemctl",
+            "id": "/usr/bin/id",
+        }.get(name),
     )
     monkeypatch.setattr(
         "rain_bypass.install_cli.install_unattended_upgrades",
@@ -1007,8 +1015,9 @@ def test_install_autoupdate_installs(monkeypatch, tmp_path):
         skip_confirm=True,
     )
     assert chmod_calls == [(script / "auto-update.sh", 0o755)]
-    assert calls[0][:2] == ["sudo", "tee"]
-    assert str(calls[0][2]).endswith(f"{AUTO_UPDATE_SERVICE_NAME}.service")
+    tee_calls = [c for c in calls if c[:2] == ["sudo", "tee"] and str(c[2]).endswith(".service")]
+    assert len(tee_calls) == 1
+    assert tee_inputs == [render_autoupdate_service(tmp_path, "pi").encode()]
     assert calls[-1] == [
         "sudo",
         "systemctl",
@@ -1016,6 +1025,48 @@ def test_install_autoupdate_installs(monkeypatch, tmp_path):
         "--now",
         f"{AUTO_UPDATE_SERVICE_NAME}.timer",
     ]
+
+
+def test_install_autoupdate_service_user_root_without_pi(monkeypatch, tmp_path):
+    script = tmp_path / "scripts"
+    script.mkdir()
+    (script / "auto-update.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    tee_inputs: list[bytes] = []
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["sudo", "tee"] and str(cmd[2]).endswith(".service"):
+            tee_inputs.append(kwargs.get("input", b""))
+        if cmd[:3] == ["id", "-u", "pi"]:
+            return CompletedProcess(cmd, 1)
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: {
+            "systemctl": "/usr/bin/systemctl",
+            "id": "/usr/bin/id",
+        }.get(name),
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.install_unattended_upgrades",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.autoupdate_service_template_path",
+        lambda: repo_root() / "deploy" / "rain-bypass-auto-update.service.in",
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.autoupdate_timer_template_path",
+        lambda: repo_root() / "deploy" / "rain-bypass-auto-update.timer.in",
+    )
+    install_autoupdate(
+        tmp_path,
+        prompter=FakePrompter(confirms=[True]),
+        run_command=fake_run,
+        skip_confirm=True,
+    )
+    assert tee_inputs == [render_autoupdate_service(tmp_path, "root").encode()]
 
 
 def test_cli_setup_autoupdate(monkeypatch):

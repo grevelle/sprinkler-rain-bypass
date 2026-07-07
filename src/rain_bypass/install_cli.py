@@ -404,11 +404,15 @@ def run_configure(
     typer.echo("  Other settings: nano settings.toml (then restart the service)")
 
 
-def render_autoupdate_service(root: Path) -> str:
+def render_autoupdate_service(root: Path, service_user: str) -> str:
     template = autoupdate_service_template_path()
     if not template.is_file():
         raise FileNotFoundError(f"auto-update service template not found: {template}")
-    return template.read_text(encoding="utf-8").replace("@ROOT@", root.as_posix())
+    return (
+        template.read_text(encoding="utf-8")
+        .replace("@ROOT@", root.as_posix())
+        .replace("@USER@", service_user)
+    )
 
 
 def render_autoupdate_timer() -> str:
@@ -492,12 +496,16 @@ def install_autoupdate(
 
     install_unattended_upgrades(run_command=runner)
 
+    service_user = "root"
+    if shutil.which("id") and runner(["id", "-u", "pi"], check=False).returncode == 0:
+        service_user = "pi"
+
     service_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.service")
     timer_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.timer")
     typer.echo(f"==> Installing {service_path} and {timer_path} (requires sudo)")
     runner(
         ["sudo", "tee", str(service_path)],
-        input=render_autoupdate_service(root).encode(),
+        input=render_autoupdate_service(root, service_user).encode(),
         check=True,
     )
     runner(
