@@ -143,3 +143,18 @@ def test_write_settings_chmod_on_posix(tmp_path: Path, monkeypatch):
     assert len(chmod_calls) == 1
     assert os.path.normcase(os.fspath(chmod_calls[0][0])) == os.path.normcase(os.fspath(path))
     assert chmod_calls[0][1] == 0o600
+
+
+def test_write_settings_skips_chmod_off_posix(tmp_path: Path, monkeypatch):
+    import rain_bypass.config as config_module
+
+    chmod_calls: list[tuple[object, int]] = []
+    monkeypatch.setattr(config_module.os, "name", "nt")
+    monkeypatch.setattr(
+        config_module.os,
+        "chmod",
+        lambda path, mode: chmod_calls.append((path, mode)),
+    )
+    path = tmp_path / "settings.toml"
+    write_settings(path, load_example_settings(weather={"api_key": "skip-chmod-key"}))
+    assert chmod_calls == []
