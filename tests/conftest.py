@@ -1,6 +1,6 @@
+import sys
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -26,20 +26,33 @@ def settings(settings_path: Path):
 
 
 @pytest.fixture
-def fake_rpi():
-    fake_gpio = ModuleType("RPi.GPIO")
-    fake_gpio.BCM = "BCM"
-    fake_gpio.OUT = "OUT"
-    fake_gpio.HIGH = 1
-    fake_gpio.LOW = 0
-    fake_gpio.setmode = MagicMock()
-    fake_gpio.setwarnings = MagicMock()
-    fake_gpio.setup = MagicMock()
-    fake_gpio.output = MagicMock()
-    fake_gpio.cleanup = MagicMock()
-    fake_rpi = ModuleType("RPi")
-    fake_rpi.GPIO = fake_gpio
-    return fake_rpi, fake_gpio
+def fake_output_device(monkeypatch):
+    devices: list[object] = []
+
+    class FakeDevice:
+        def __init__(self, pin: int, initial_value: bool = False) -> None:
+            self.pin = pin
+            self.value = initial_value
+            self.on_calls = 0
+            self.off_calls = 0
+            self.closed = False
+            devices.append(self)
+
+        def on(self) -> None:
+            self.on_calls += 1
+            self.value = True
+
+        def off(self) -> None:
+            self.off_calls += 1
+            self.value = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_gpiozero = ModuleType("gpiozero")
+    fake_gpiozero.OutputDevice = FakeDevice
+    monkeypatch.setitem(sys.modules, "gpiozero", fake_gpiozero)
+    return devices
 
 
 @pytest.fixture

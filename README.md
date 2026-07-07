@@ -39,7 +39,7 @@ cp settings.example.toml settings.toml
 | Prerequisites | `./install.sh` checks for **python3-venv**, **git**, and on the Pi **python3-dev** + **build-essential**; offers `sudo apt-get install` if anything is missing |
 | First install | `./install.sh` on a Zero W can take **10–20 minutes** (slow CPU + SD card) |
 | Wi‑Fi | Stable connection required for Visual Crossing; default API timeout is **45 s** |
-| GPIO library | **`RPi.GPIO`** — correct for Zero W’s classic BCM2835 GPIO |
+| GPIO library | **GPIO Zero** (`lgpio` backend on Bookworm+) — works on Zero W through Pi 5 |
 | Relay module | **3.3 V** logic (see Hardware below) |
 | systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
 | Maintenance | Optional **daily auto-update** at 12:00 — `git pull`, pip, service restart (OS via `unattended-upgrades`; see [Automatic updates](#automatic-daily-updates)) |

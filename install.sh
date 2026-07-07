@@ -42,6 +42,9 @@ collect_missing_packages() {
     if ! pkg_installed python3-dev; then
       MISSING_PACKAGES+=(python3-dev)
     fi
+    if ! pkg_installed python3-lgpio; then
+      MISSING_PACKAGES+=(python3-lgpio)
+    fi
     if ! command -v gcc >/dev/null 2>&1; then
       MISSING_PACKAGES+=(build-essential)
     fi

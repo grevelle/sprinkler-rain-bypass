@@ -18,8 +18,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "respx", "ruff", "pyright", "pre-commit", "shellcheck-py"]
-gpio = ["RPi.GPIO; platform_system == 'Linux'"]
+dev = ["pytest", "pytest-cov", "respx", "ruff", "pyright", "pre-commit", "shellcheck-py", "gpiozero"]
+gpio = [
+    "gpiozero; platform_system == 'Linux'",
+    "lgpio; platform_system == 'Linux'",
+]
 
 [project.scripts]
 rain-bypass = "rain_bypass.cli:app"
