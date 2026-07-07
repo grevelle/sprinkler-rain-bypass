@@ -39,7 +39,7 @@ cp settings.example.toml settings.toml   # edit api_key (and zip_code if not 530
 | GPIO library | **`RPi.GPIO`** — correct for Zero W’s classic BCM2835 GPIO |
 | Relay module | **3.3 V** logic (see Hardware below) |
 | systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
-| Maintenance | Optional **daily auto-update** at 04:00 — OS packages, `git pull`, pip, service restart (see [Automatic updates](#automatic-daily-updates)) |
+| Maintenance | Optional **daily auto-update** at 12:00 — `git pull`, pip, service restart (OS via `unattended-upgrades`; see [Automatic updates](#automatic-daily-updates)) |
 
 On boot the relay **blocks watering** until the first check completes, then applies the decision from the daily check.
 
@@ -189,7 +189,7 @@ sudo systemctl restart rain-bypass
 | Timer | When | What |
 | ----- | ---- | ---- |
 | `apt-daily-upgrade.timer` | ~06:00–07:00 (system default) | **OS packages** via `unattended-upgrades` (Debian/Raspbian standard); auto-reboot at **04:15** if needed |
-| `rain-bypass-auto-update.timer` | **04:00** | **`git pull`**, **`pip install`**, restart `rain-bypass` |
+| `rain-bypass-auto-update.timer` | **12:00** | **`git pull`**, **`pip install`**, restart `rain-bypass` |
 
 `setup-autoupdate` installs `unattended-upgrades`, writes `/etc/apt/apt.conf.d/20auto-upgrades` and `51unattended-upgrades-rain-bypass`, and enables both timer sets.
 

@@ -3,8 +3,8 @@
 Description=Daily auto-update timer for Sprinkler Rain Bypass
 
 [Timer]
-# 04:00 local — after midnight check and typical 1 AM irrigation window.
-OnCalendar=*-*-* 04:00:00
+# 12:00 local — midday app update (git pull, pip, service restart).
+OnCalendar=*-*-* 12:00:00
 Persistent=true
 RandomizedDelaySec=15m
 
