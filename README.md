@@ -188,8 +188,8 @@ sudo systemctl restart rain-bypass
 
 | Timer | When | What |
 | ----- | ---- | ---- |
-| `apt-daily-upgrade.timer` | ~06:00–07:00 (system default) | **OS packages** via `unattended-upgrades` (Debian/Raspbian standard); auto-reboot at **04:15** if needed |
-| `rain-bypass-auto-update.timer` | **12:00** | **`git pull`**, **`pip install`**, restart `rain-bypass` |
+| `apt-daily-upgrade.timer` | ~06:00–07:00 (system default) | **OS packages** via `unattended-upgrades` (Debian/Raspbian standard) |
+| `rain-bypass-auto-update.timer` | **12:00** | **`git pull`**, **`pip install`**, restart `rain-bypass`; **reboot** if kernel/glibc update pending |
 
 `setup-autoupdate` installs `unattended-upgrades`, writes `/etc/apt/apt.conf.d/20auto-upgrades` and `51unattended-upgrades-rain-bypass`, and enables both timer sets.
 

@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Auto-update service** runs as the `pi` user (when present) so `git pull` no longer fails with dubious ownership when triggered by the systemd timer as root.
 
+### Changed
+
+- OS reboot after kernel updates runs at the end of the **12:00** app auto-update (`/var/run/reboot-required`), not at 04:15 via `unattended-upgrades`.
+
 ## [5.2.2] - 2026-07-06
 
 ### Changed
@@ -24,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **OS auto-update** now uses Debian/Raspbian **`unattended-upgrades`** (`apt-daily` / `apt-daily-upgrade` timers) instead of `apt upgrade` inside `auto-update.sh`.
-- `setup-autoupdate` installs `unattended-upgrades` and drops config in `/etc/apt/apt.conf.d/` (all origins, auto-reboot at 04:15).
+- `setup-autoupdate` installs `unattended-upgrades` and drops config in `/etc/apt/apt.conf.d/` (all origins; reboot deferred to app auto-update at 12:00).
 - `scripts/auto-update.sh` is **app-only** (`git pull`, pip, service restart).
 
 ## [5.2.0] - 2026-07-06

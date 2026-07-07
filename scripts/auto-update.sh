@@ -64,4 +64,14 @@ fi
 
 restart_service
 
+if [[ -f /var/run/reboot-required ]]; then
+  log "Kernel or libc update requires reboot; rebooting after app auto-update"
+  sleep 10
+  if [[ "$(id -u)" -eq 0 ]]; then
+    systemctl reboot
+  else
+    sudo systemctl reboot
+  fi
+fi
+
 log "Daily auto-update finished"
