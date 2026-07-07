@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.1] - 2026-07-06
+
+### Changed
+
+- **OS auto-update** now uses Debian/Raspbian **`unattended-upgrades`** (`apt-daily` / `apt-daily-upgrade` timers) instead of `apt upgrade` inside `auto-update.sh`.
+- `setup-autoupdate` installs `unattended-upgrades` and drops config in `/etc/apt/apt.conf.d/` (all origins, auto-reboot at 04:15).
+- `scripts/auto-update.sh` is **app-only** (`git pull`, pip, service restart).
+
 ## [5.2.0] - 2026-07-06
 
 ### Added

@@ -75,6 +75,14 @@ def autoupdate_timer_template_path() -> Path:
     return repo_root() / "deploy" / "rain-bypass-auto-update.timer.in"
 
 
+def apt_auto_upgrades_path() -> Path:
+    return repo_root() / "deploy" / "apt-20auto-upgrades.conf"
+
+
+def apt_unattended_local_path() -> Path:
+    return repo_root() / "deploy" / "apt-51unattended-upgrades-local.conf"
+
+
 def render_systemd_unit(root: Path, python: Path, settings: Path, service_user: str) -> str:
     template = systemd_template_path()
     if not template.is_file():
@@ -410,6 +418,49 @@ def render_autoupdate_timer() -> str:
     return template.read_text(encoding="utf-8")
 
 
+def install_unattended_upgrades(*, run_command: RunCommand | None = None) -> None:
+    """Enable Debian/Raspbian unattended-upgrades (apt-daily / apt-daily-upgrade timers)."""
+    runner: RunCommand = run_command or subprocess.run
+    if shutil.which("apt-get") is None:
+        typer.secho(
+            "warning: apt-get not found; skipping unattended-upgrades.",
+            fg=typer.colors.YELLOW,
+        )
+        return
+
+    auto_conf = apt_auto_upgrades_path()
+    local_conf = apt_unattended_local_path()
+    if not auto_conf.is_file() or not local_conf.is_file():
+        typer.secho(
+            "warning: unattended-upgrades config templates missing; skipping OS auto-update.",
+            fg=typer.colors.YELLOW,
+        )
+        return
+
+    typer.echo("==> Installing unattended-upgrades (automatic OS package updates)")
+    runner(["sudo", "apt-get", "update", "-qq"], check=True)
+    runner(
+        ["sudo", "apt-get", "install", "-y", "-qq", "unattended-upgrades"],
+        check=True,
+    )
+    runner(
+        ["sudo", "tee", "/etc/apt/apt.conf.d/20auto-upgrades"],
+        input=auto_conf.read_bytes(),
+        check=True,
+    )
+    runner(
+        ["sudo", "tee", "/etc/apt/apt.conf.d/51unattended-upgrades-rain-bypass"],
+        input=local_conf.read_bytes(),
+        check=True,
+    )
+    if shutil.which("systemctl") is not None:
+        runner(["sudo", "systemctl", "enable", "--now", "apt-daily.timer"], check=False)
+        runner(["sudo", "systemctl", "enable", "--now", "apt-daily-upgrade.timer"], check=False)
+    typer.echo(
+        "==> OS auto-update enabled (apt-daily.timer + apt-daily-upgrade.timer / unattended-upgrades)"
+    )
+
+
 def install_autoupdate(
     root: Path,
     *,
@@ -438,6 +489,8 @@ def install_autoupdate(
         return
     if _is_posix():
         os.chmod(auto_script, 0o755)
+
+    install_unattended_upgrades(run_command=runner)
 
     service_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.service")
     timer_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.timer")

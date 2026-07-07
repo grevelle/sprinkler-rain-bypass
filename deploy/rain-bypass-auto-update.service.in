@@ -1,6 +1,6 @@
 # Template — placeholder @ROOT@ filled by rain-bypass-install.
 [Unit]
-Description=Daily auto-update for Sprinkler Rain Bypass (OS, app, libraries)
+Description=Daily auto-update for Sprinkler Rain Bypass (git pull, pip, service restart)
 After=network-online.target
 Wants=network-online.target
 

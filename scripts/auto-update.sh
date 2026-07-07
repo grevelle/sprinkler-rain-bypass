@@ -27,26 +27,8 @@ restart_service() {
 
 log "Starting daily auto-update in ${ROOT}"
 
-if command -v apt-get >/dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  if [[ "$(id -u)" -eq 0 ]]; then
-    apt() { apt-get "$@"; }
-  elif command -v sudo >/dev/null 2>&1; then
-    apt() { sudo apt-get "$@"; }
-  else
-    log "warning: not root and sudo missing; skipping OS upgrades"
-    apt() { return 0; }
-  fi
-  log "Updating apt package lists"
-  apt update -qq
-  log "Upgrading installed packages"
-  apt upgrade -y -qq \
-    -o Dpkg::Options::="--force-confdef" \
-    -o Dpkg::Options::="--force-confold" \
-    || log "warning: apt upgrade exited non-zero (continuing)"
-else
-  log "apt-get not found; skipping OS upgrades"
-fi
+# OS package upgrades are handled by unattended-upgrades (apt-daily-upgrade.timer).
+# This job updates the rain-bypass application only.
 
 if [[ ! -x "${PYTHON}" ]]; then
   log "error: ${PYTHON} not found; run ./install.sh first"
@@ -81,15 +63,5 @@ if [[ -n "${before_rev}" && -n "${after_rev}" && "${before_rev}" != "${after_rev
 fi
 
 restart_service
-
-if [[ -f /var/run/reboot-required ]]; then
-  log "Kernel or libc update requires reboot; rebooting now"
-  sleep 10
-  if [[ "$(id -u)" -eq 0 ]]; then
-    systemctl reboot
-  else
-    sudo systemctl reboot
-  fi
-fi
 
 log "Daily auto-update finished"

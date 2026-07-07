@@ -21,6 +21,7 @@ from rain_bypass.install_cli import (
     ensure_state_writable,
     install_autoupdate,
     install_systemd_unit,
+    install_unattended_upgrades,
     load_existing_settings_fields,
     load_prompt_defaults,
     load_settings_base,
@@ -988,6 +989,10 @@ def test_install_autoupdate_installs(monkeypatch, tmp_path):
         lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
     )
     monkeypatch.setattr(
+        "rain_bypass.install_cli.install_unattended_upgrades",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
         "rain_bypass.install_cli.autoupdate_service_template_path",
         lambda: repo_root() / "deploy" / "rain-bypass-auto-update.service.in",
     )
@@ -1069,3 +1074,57 @@ def test_run_install_skips_autoupdate_off_pi(tmp_path, monkeypatch):
     run_install(tmp_path, prompter=prompter, skip_once=True)
     assert systemd_calls == [True]
     assert autoupdate_calls == []
+
+
+def test_install_unattended_upgrades_skips_without_apt(monkeypatch):
+    monkeypatch.setattr("rain_bypass.install_cli.shutil.which", lambda _name: None)
+    install_unattended_upgrades()
+
+
+def test_install_unattended_upgrades_missing_templates(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/apt-get" if name == "apt-get" else None,
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.apt_auto_upgrades_path",
+        lambda: tmp_path / "missing-auto.conf",
+    )
+    install_unattended_upgrades()
+
+
+def test_install_unattended_upgrades_without_systemctl(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: "/usr/bin/apt-get" if name == "apt-get" else None,
+    )
+    install_unattended_upgrades(run_command=fake_run)
+    assert not any(cmd[:3] == ["sudo", "systemctl", "enable"] for cmd in calls)
+
+
+def test_install_unattended_upgrades_installs(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(
+        "rain_bypass.install_cli.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"apt-get", "systemctl"} else None,
+    )
+    install_unattended_upgrades(run_command=fake_run)
+    assert calls[0] == ["sudo", "apt-get", "update", "-qq"]
+    assert calls[1][:4] == ["sudo", "apt-get", "install", "-y"]
+    assert calls[2][:3] == ["sudo", "tee", "/etc/apt/apt.conf.d/20auto-upgrades"]
+    assert calls[3][:3] == [
+        "sudo",
+        "tee",
+        "/etc/apt/apt.conf.d/51unattended-upgrades-rain-bypass",
+    ]

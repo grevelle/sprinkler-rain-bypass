@@ -184,13 +184,14 @@ sudo systemctl restart rain-bypass
 
 ### Automatic daily updates
 
-`./install.sh` on a Raspberry Pi can install a **systemd timer** that runs every day at **04:00** (after the default midnight check and typical 1 AM irrigation). It:
+`./install.sh` on a Raspberry Pi can enable **two** complementary timers:
 
-1. Upgrades all **apt** packages (Raspberry Pi OS)
-2. **`git pull`** from `main`
-3. **`pip install -e '.[gpio]'`** for latest Python libraries
-4. **Restarts** `rain-bypass`
-5. **Reboots** if a kernel/glibc update requires it
+| Timer | When | What |
+| ----- | ---- | ---- |
+| `apt-daily-upgrade.timer` | ~06:00–07:00 (system default) | **OS packages** via `unattended-upgrades` (Debian/Raspbian standard); auto-reboot at **04:15** if needed |
+| `rain-bypass-auto-update.timer` | **04:00** | **`git pull`**, **`pip install`**, restart `rain-bypass` |
+
+`setup-autoupdate` installs `unattended-upgrades`, writes `/etc/apt/apt.conf.d/20auto-upgrades` and `51unattended-upgrades-rain-bypass`, and enables both timer sets.
 
 Enable on an existing Pi:
 
@@ -200,24 +201,38 @@ git pull
 .venv/bin/python -m rain_bypass.install_cli setup-autoupdate --yes
 ```
 
-Check the timer:
+Check the timers:
 
 ```bash
-sudo systemctl list-timers rain-bypass-auto-update.timer
+sudo systemctl list-timers apt-daily-upgrade.timer rain-bypass-auto-update.timer
 sudo journalctl -u rain-bypass-auto-update.service --since today
+sudo journalctl -u apt-daily-upgrade.service --since today
 ```
 
-Run once manually (requires root/sudo for apt):
+Run app update once manually:
 
 ```bash
 cd ~/sprinkler-rain-bypass
 sudo ./scripts/auto-update.sh
 ```
 
-Disable:
+Run OS update once manually:
+
+```bash
+sudo unattended-upgrade -v
+```
+
+Disable app auto-update:
 
 ```bash
 sudo systemctl disable --now rain-bypass-auto-update.timer
+```
+
+Disable OS auto-update:
+
+```bash
+sudo rm /etc/apt/apt.conf.d/20auto-upgrades /etc/apt/apt.conf.d/51unattended-upgrades-rain-bypass
+sudo systemctl disable --now apt-daily-upgrade.timer
 ```
 
 ### Development & CI
