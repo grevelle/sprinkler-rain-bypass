@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import typer
 
-from rain_bypass.config import Settings, State, load_settings
+from rain_bypass.config import Settings, State, format_sewer_range, load_settings
 from rain_bypass.logic import preview
 from rain_bypass.models import Evaluation, Preview
 from rain_bypass.windows import local_now, seconds_until_next_check
@@ -116,14 +116,14 @@ def gather_status(settings: Settings, state: State, *, fetch_live: bool = True) 
     )
 
 
-def _line(label: str, value: str, *, width: int = 16) -> str:
-    return f"  {label:<{width}} {value}"
-
-
-def _inch(value: float | None) -> str:
+def format_inches(value: float | None) -> str:
     if value is None:
         return "n/a"
     return f"{value:.2f} in"
+
+
+def _line(label: str, value: str, *, width: int = 16) -> str:
+    return f"  {label:<{width}} {value}"
 
 
 def _append_balance_section(
@@ -139,9 +139,9 @@ def _append_balance_section(
         [
             "",
             f"Balance ({month_name})",
-            _line("Month target", _inch(evaluation.monthly_target)),
-            _line("Target to date", _inch(evaluation.target_to_date)),
-            _line("Deficit", _inch(evaluation.deficit)),
+            _line("Month target", format_inches(evaluation.monthly_target)),
+            _line("Target to date", format_inches(evaluation.target_to_date)),
+            _line("Deficit", format_inches(evaluation.deficit)),
             _line("Formula", format_deficit_formula(evaluation, irrigation_mtd, inches_per_cycle)),
             _line(
                 "Needs / cycle",
@@ -165,7 +165,7 @@ def _append_weather_metrics(
 ) -> None:
     prefix = "Rain MTD (saved)" if saved else "Rain MTD"
     forecast_label = "Forecast (saved)" if saved else "Forecast"
-    lines.append(_line(prefix, _inch(rain_mtd)))
+    lines.append(_line(prefix, format_inches(rain_mtd)))
     lines.append(_line(forecast_label, f"{forecast_inches:.2f} in ({forecast_days} days)"))
     if max_daily_inches is None:
         lines.append(_line("Max day", "n/a (not saved)"))
@@ -206,9 +206,9 @@ def format_status(snapshot: StatusSnapshot) -> str:
                 now=snapshot.local_time,
             ),
         ),
-        _line("Rain (saved)", _inch(snapshot.state.rainfall_inches)),
-        _line("Forecast (saved)", _inch(snapshot.state.forecast_inches)),
-        _line("Irrigation MTD", _inch(pv.irrigation_mtd)),
+        _line("Rain (saved)", format_inches(snapshot.state.rainfall_inches)),
+        _line("Forecast (saved)", format_inches(snapshot.state.forecast_inches)),
+        _line("Irrigation MTD", format_inches(pv.irrigation_mtd)),
     ]
     if snapshot.state.last_error:
         lines.append(_line("Last error", snapshot.state.last_error))
@@ -221,8 +221,7 @@ def format_status(snapshot: StatusSnapshot) -> str:
                 "Evaluation",
                 _line(
                     "Sewer lockout",
-                    f"ACTIVE ({sewer.start_month:02d}/{sewer.start_day:02d}"
-                    f"–{sewer.end_month:02d}/{sewer.end_day:02d}) — watering blocked",
+                    f"ACTIVE ({format_sewer_range(sewer)}) — watering blocked",
                 ),
             ]
         )

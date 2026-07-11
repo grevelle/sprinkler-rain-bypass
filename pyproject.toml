@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "respx", "ruff", "pyright", "pre-commit", "shellcheck-py", "gpiozero"]
+dev = ["pytest", "pytest-cov", "respx", "ruff", "pyright", "pre-commit", "shellcheck-py", "gpiozero", "vulture"]
 gpio = [
     "gpiozero; platform_system == 'Linux'",
     "lgpio; platform_system == 'Linux'",
@@ -35,7 +35,7 @@ Repository = "https://github.com/grevelle/sprinkler-rain-bypass"
 where = ["src"]
 
 [tool.setuptools.package-data]
-rain_bypass = ["py.typed"]
+rain_bypass = ["py.typed", "static/dashboard.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -67,6 +67,7 @@ line-length = 100
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
+"vulture_whitelist.py" = ["B018"]
 "src/rain_bypass/install_cli.py" = ["E501"]
 "src/rain_bypass/install_prompts.py" = ["E501"]
 "src/rain_bypass/install_flow.py" = ["RUF001"]

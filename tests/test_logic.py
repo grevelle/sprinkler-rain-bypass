@@ -130,7 +130,6 @@ def test_preview_would_water_from_evaluation() -> None:
         freeze_block=False,
     )
     result = Preview(
-        effective_state=State(),
         irrigation_mtd=0.0,
         sewer_lockout=False,
         live=None,

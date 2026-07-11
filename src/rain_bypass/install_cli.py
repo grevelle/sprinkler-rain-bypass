@@ -13,8 +13,6 @@ from rain_bypass.install_flow import (
 from rain_bypass.paths import repo_root
 from rain_bypass.prompting import TyperPrompter
 
-_handle_cli_errors = handle_cli_errors
-
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,

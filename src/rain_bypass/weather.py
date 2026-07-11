@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import cast
-from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -17,7 +16,6 @@ from rain_bypass.windows import (
     event_lookback_window,
     forecast_window,
     month_start,
-    timeline_location_path,
     timeline_window,
 )
 
@@ -56,7 +54,7 @@ def timeline_params(settings: Settings) -> dict[str, str]:
 
 
 def timeline_url_for(settings: Settings, start: date, end: date) -> str:
-    return f"{VISUAL_CROSSING}/{timeline_location_path(settings.location)}/{start}/{end}"
+    return f"{VISUAL_CROSSING}/{settings.location.zip_code}/{start}/{end}"
 
 
 def resolve_location(zip_code: str, api_key: str, *, timeout: int = 45) -> Location:
@@ -99,8 +97,7 @@ def weather_api_smoke(settings: Settings) -> str:
     )
 
 
-def fetch_weather(settings: Settings, *, now: datetime | None = None) -> WeatherSnapshot:
-    del now  # daily windows only; kept for call-site compatibility
+def fetch_weather(settings: Settings) -> WeatherSnapshot:
     api_start, api_end = timeline_window(settings)
     lookback_start, lookback_end = event_lookback_window(settings)
     forecast = forecast_window(settings)
@@ -237,17 +234,6 @@ def _log_timeline_meta(payload: TimelineResponse, settings: Settings) -> None:
             config_tz,
             api_tz,
         )
-
-
-def parse_vc_datetime(raw: str, timezone: str) -> datetime:
-    tz = ZoneInfo(timezone)
-    text = str(raw).strip().replace(" ", "T")
-    if len(text) == 10:
-        text = f"{text}T00:00:00"
-    parsed = datetime.fromisoformat(text)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=tz)
-    return parsed.astimezone(tz)
 
 
 def freeze_block_for_days(daily: Sequence[TimelineDay], settings: Settings, today: date) -> bool:

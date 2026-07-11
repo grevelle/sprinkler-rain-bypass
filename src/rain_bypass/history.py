@@ -183,14 +183,33 @@ def load_records(path: Path, *, limit: int = 30) -> list[WateringRecord]:
     return records[-limit:]
 
 
-def _format_allowed(record: WateringRecord) -> str:
+def watering_verdict(record: WateringRecord) -> tuple[str, str]:
     if record.sewer_lockout:
-        return typer.style("BLOCK (sewer)", fg=typer.colors.RED)
+        return "BLOCK (sewer)", "block"
     if record.weather_error:
-        return typer.style("BLOCK (weather error)", fg=typer.colors.RED)
+        return "BLOCK (weather)", "block"
     if record.allowed:
-        return typer.style("ALLOW", fg=typer.colors.GREEN)
-    return typer.style("BLOCK", fg=typer.colors.RED)
+        return "ALLOW", "allow"
+    return "BLOCK", "block"
+
+
+def watering_record_details(record: WateringRecord) -> str:
+    if record.sewer_lockout:
+        return "Sewer lockout — seasonal hold"
+    if record.weather_error:
+        return "Blocked — weather check failed"
+    if record.allowed:
+        return f"Irrigation credited {record.inches_credited:.2f} in"
+    if record.deficit is not None and record.deficit > 0:
+        return f"{record.deficit:.2f} in still needed for balance"
+    return "Blocked — balance satisfied or safety hold"
+
+
+def _format_allowed(record: WateringRecord) -> str:
+    label, kind = watering_verdict(record)
+    if kind == "allow":
+        return typer.style(label, fg=typer.colors.GREEN)
+    return typer.style(label, fg=typer.colors.RED)
 
 
 def print_history(

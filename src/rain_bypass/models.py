@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rain_bypass.config import State
-
 
 @dataclass(frozen=True, slots=True)
 class WeatherSnapshot:
@@ -29,7 +27,6 @@ class Evaluation:
 
 @dataclass(frozen=True, slots=True)
 class Preview:
-    effective_state: State
     irrigation_mtd: float
     sewer_lockout: bool
     live: WeatherSnapshot | None
@@ -58,6 +55,4 @@ class Preview:
 class Decision:
     watering_required: bool
     evaluation: Evaluation | None
-    balance_month: int | None
-    irrigation_inches_mtd: float | None
     error: str | None

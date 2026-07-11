@@ -14,9 +14,10 @@ Invoke-Step "pip install" { python -m pip install --upgrade pip }
 Invoke-Step "editable install" { python -m pip install --upgrade -e ".[dev]" }
 Invoke-Step "ruff check" { python -m ruff check . }
 Invoke-Step "ruff format" { python -m ruff format --check . }
-Invoke-Step "shellcheck" { shellcheck install.sh configure.sh scripts/auto-update.sh }
+Invoke-Step "shellcheck" { shellcheck install.sh configure.sh scripts/auto-update.sh scripts/lib/common.sh }
 Invoke-Step "check LF" { python scripts/check_lf.py }
 Invoke-Step "pyright" { python -m pyright }
+Invoke-Step "vulture" { python -m vulture src/rain_bypass vulture_whitelist.py --min-confidence 80 }
 Invoke-Step "pytest" {
     python -m pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100
 }

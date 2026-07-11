@@ -1,12 +1,14 @@
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import ModuleType
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from rain_bypass.config import Gpio, load_example_settings, load_settings, write_settings
-from rain_bypass.models import WeatherSnapshot
+from rain_bypass.config import Gpio, State, load_example_settings, load_settings, write_settings
+from rain_bypass.models import Evaluation, Preview, WeatherSnapshot
+from rain_bypass.status import StatusSnapshot
 from rain_bypass.weather import TimelineDay
 
 TEST_SETTINGS_OVERRIDES = {
@@ -32,6 +34,74 @@ def timeline_day(**fields: object) -> TimelineDay:
 def patch_local_today(monkeypatch: pytest.MonkeyPatch, fixed: date) -> date:
     monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: fixed)
     return fixed
+
+
+def evaluation(**overrides: object) -> Evaluation:
+    defaults: dict[str, object] = {
+        "watering_required": True,
+        "balance_ok": True,
+        "safety_ok": True,
+        "deficit": 0.5,
+        "target_to_date": 0.97,
+        "monthly_target": 5.0,
+        "rain_mtd": 0.26,
+        "forecast_inches": 0.02,
+        "max_daily_inches": 0.05,
+        "freeze_block": False,
+    }
+    defaults.update(overrides)
+    return Evaluation(**defaults)  # type: ignore[arg-type]
+
+
+def preview(**overrides: object) -> Preview:
+    defaults: dict[str, object] = {
+        "irrigation_mtd": 0.63,
+        "sewer_lockout": False,
+        "live": None,
+        "live_error": None,
+        "evaluation": evaluation(),
+        "cached_verdict": True,
+        "from_saved_weather": True,
+        "safety_known": True,
+    }
+    defaults.update(overrides)
+    return Preview(**defaults)  # type: ignore[arg-type]
+
+
+def status_snapshot(
+    settings,
+    *,
+    preview_obj: Preview | None = None,
+    state: State | None = None,
+    fetch_live: bool = False,
+    when: datetime | None = None,
+) -> StatusSnapshot:
+    if preview_obj is None:
+        preview_obj = preview()
+    if state is None:
+        state = State(watering_required=True, rainfall_inches=0.1, forecast_inches=0.05)
+    if when is None:
+        when = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo(settings.location.timezone))
+    return StatusSnapshot(
+        settings=settings,
+        state=state,
+        local_time=when,
+        next_check_seconds=3600.0,
+        preview=preview_obj,
+        fetch_live=fetch_live,
+    )
+
+
+def mock_gather_status(monkeypatch: pytest.MonkeyPatch, snapshot: StatusSnapshot) -> None:
+    monkeypatch.setattr(
+        "rain_bypass.web.gather_status",
+        lambda *_args, **_kwargs: snapshot,
+    )
+
+
+@pytest.fixture
+def frozen_july_clock(settings) -> datetime:
+    return datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo(settings.location.timezone))
 
 
 @pytest.fixture

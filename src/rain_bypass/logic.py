@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date
 
 from rain_bypass import balance, config
@@ -11,6 +12,41 @@ from rain_bypass.models import Decision, Evaluation, Preview, WeatherSnapshot
 from rain_bypass.weather import fetch_weather
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _DailyContext:
+    today: date
+    irr: float
+    sewer: bool
+
+
+def _daily_context(settings: Settings) -> _DailyContext:
+    today = config.local_today(settings.location)
+    return _DailyContext(
+        today=today,
+        irr=irrigation_mtd(settings, today),
+        sewer=in_sewer_lockout(settings.sewer, today),
+    )
+
+
+def _sewer_decision(settings: Settings) -> Decision | None:
+    ctx = _daily_context(settings)
+    if not ctx.sewer:
+        return None
+    sewer = settings.sewer
+    logger.info(
+        "sewer lockout (%02d/%02d-%02d/%02d); watering blocked to protect annual sewer cap",
+        sewer.start_month,
+        sewer.start_day,
+        sewer.end_month,
+        sewer.end_day,
+    )
+    return Decision(
+        watering_required=False,
+        evaluation=None,
+        error=None,
+    )
 
 
 def safety_allows_watering(snapshot: WeatherSnapshot, settings: Settings) -> bool:
@@ -74,7 +110,6 @@ def _safety_fields_saved(state: State) -> bool:
 
 
 def _build_preview(
-    effective_state: State,
     *,
     irrigation_mtd_value: float,
     sewer_lockout: bool = False,
@@ -86,7 +121,6 @@ def _build_preview(
     safety_known: bool = True,
 ) -> Preview:
     return Preview(
-        effective_state=effective_state,
         irrigation_mtd=irrigation_mtd_value,
         sewer_lockout=sewer_lockout,
         live=live,
@@ -99,23 +133,20 @@ def _build_preview(
 
 
 def preview(settings: Settings, state: State, *, fetch_live: bool = True) -> Preview:
-    today = config.local_today(settings.location)
-    sewer = in_sewer_lockout(settings.sewer, today)
-    irr = irrigation_mtd(settings, today)
+    ctx = _daily_context(settings)
 
-    if sewer:
-        return _build_preview(state, irrigation_mtd_value=irr, sewer_lockout=True)
+    if ctx.sewer:
+        return _build_preview(irrigation_mtd_value=ctx.irr, sewer_lockout=True)
 
     if not fetch_live:
         cached = state.watering_required if state.watering_required is not None else None
         saved = _snapshot_from_state(state)
         if saved is None:
-            return _build_preview(state, irrigation_mtd_value=irr, cached_verdict=cached)
+            return _build_preview(irrigation_mtd_value=ctx.irr, cached_verdict=cached)
         safety_known = _safety_fields_saved(state)
-        evaluation = evaluate_weather(settings, saved, irr, today)
+        evaluation = evaluate_weather(settings, saved, ctx.irr, ctx.today)
         return _build_preview(
-            state,
-            irrigation_mtd_value=irr,
+            irrigation_mtd_value=ctx.irr,
             evaluation=evaluation,
             cached_verdict=cached,
             from_saved_weather=True,
@@ -125,32 +156,18 @@ def preview(settings: Settings, state: State, *, fetch_live: bool = True) -> Pre
     try:
         live = fetch_weather(settings)
     except WeatherError as exc:
-        return _build_preview(state, irrigation_mtd_value=irr, live_error=str(exc))
+        return _build_preview(irrigation_mtd_value=ctx.irr, live_error=str(exc))
 
-    evaluation = evaluate_weather(settings, live, irr, today)
-    return _build_preview(state, irrigation_mtd_value=irr, live=live, evaluation=evaluation)
+    evaluation = evaluate_weather(settings, live, ctx.irr, ctx.today)
+    return _build_preview(irrigation_mtd_value=ctx.irr, live=live, evaluation=evaluation)
 
 
 def decide(settings: Settings, state: State) -> Decision:
-    today = config.local_today(settings.location)
-    irr = irrigation_mtd(settings, today)
+    sewer = _sewer_decision(settings)
+    if sewer is not None:
+        return sewer
 
-    if in_sewer_lockout(settings.sewer, today):
-        sewer = settings.sewer
-        logger.info(
-            "sewer lockout (%02d/%02d-%02d/%02d); watering blocked to protect annual sewer cap",
-            sewer.start_month,
-            sewer.start_day,
-            sewer.end_month,
-            sewer.end_day,
-        )
-        return Decision(
-            watering_required=False,
-            evaluation=None,
-            balance_month=today.month,
-            irrigation_inches_mtd=irr,
-            error=None,
-        )
+    ctx = _daily_context(settings)
 
     try:
         snapshot = fetch_weather(settings)
@@ -164,12 +181,10 @@ def decide(settings: Settings, state: State) -> Decision:
         return Decision(
             watering_required=watering,
             evaluation=None,
-            balance_month=today.month,
-            irrigation_inches_mtd=irr,
             error=str(exc),
         )
 
-    evaluation = evaluate_weather(settings, snapshot, irr, today)
+    evaluation = evaluate_weather(settings, snapshot, ctx.irr, ctx.today)
 
     if snapshot.freeze_block:
         logger.info(
@@ -182,7 +197,7 @@ def decide(settings: Settings, state: State) -> Decision:
         "deficit=%.2f watering_required=%s",
         evaluation.target_to_date,
         evaluation.rain_mtd,
-        irr,
+        ctx.irr,
         evaluation.forecast_inches,
         evaluation.deficit,
         evaluation.watering_required,
@@ -191,7 +206,5 @@ def decide(settings: Settings, state: State) -> Decision:
     return Decision(
         watering_required=evaluation.watering_required,
         evaluation=evaluation,
-        balance_month=today.month,
-        irrigation_inches_mtd=irr,
         error=None,
     )

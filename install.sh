@@ -4,16 +4,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
-
-# Must match rain_bypass/platform.py (runs before the venv exists).
-is_raspberry_pi() {
-  if [[ ! -r /proc/device-tree/model ]]; then
-    return 1
-  fi
-  local model
-  model="$(tr -d '\0' < /proc/device-tree/model)"
-  [[ "${model}" == *[Rr]aspberry* ]]
-}
+# shellcheck source=scripts/lib/common.sh
+source "${ROOT}/scripts/lib/common.sh"
 
 can_create_venv() {
   local probe
@@ -105,7 +97,6 @@ if [[ ! -d "${ROOT}/.venv" ]]; then
 fi
 
 # --no-cache-dir saves SD wear/space on Pi Zero W; --upgrade always pulls latest deps.
-"${ROOT}/.venv/bin/python" -m pip install -q --upgrade pip
-"${ROOT}/.venv/bin/python" -m pip install -q --upgrade --no-cache-dir -e ".[gpio]"
+upgrade_venv_package "${ROOT}/.venv/bin/python" gpio
 
 exec "${ROOT}/.venv/bin/python" -m rain_bypass.install_cli "$@"

@@ -3,6 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "${ROOT}/scripts/lib/common.sh"
 LOG_TAG="rain-bypass-auto-update"
 SERVICE_NAME="rain-bypass"
 PYTHON="${ROOT}/.venv/bin/python"
@@ -77,8 +79,7 @@ if git rev-parse HEAD >/dev/null 2>&1; then
 fi
 
 log "Upgrading Python dependencies"
-"${PYTHON}" -m pip install -q --upgrade pip
-"${PYTHON}" -m pip install -q --upgrade --no-cache-dir -e ".[gpio]"
+upgrade_venv_package "${PYTHON}" gpio
 
 if [[ -n "${before_rev}" && -n "${after_rev}" && "${before_rev}" != "${after_rev}" ]]; then
   log "Application updated (${before_rev:0:7} -> ${after_rev:0:7})"

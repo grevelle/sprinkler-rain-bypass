@@ -6,12 +6,11 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import patch_local_today, weather_snapshot
+from conftest import evaluation, patch_local_today, weather_snapshot
 from typer.testing import CliRunner
 
 from rain_bypass.cli import app
 from rain_bypass.config import ConfigError, State
-from rain_bypass.models import Evaluation
 from rain_bypass.status import (
     format_deficit_formula,
     format_duration,
@@ -25,23 +24,6 @@ from rain_bypass.status import (
     relay_label,
     relay_mismatch_note,
 )
-
-
-def _evaluation(**overrides: object) -> Evaluation:
-    defaults = {
-        "watering_required": True,
-        "balance_ok": True,
-        "safety_ok": True,
-        "deficit": 0.5,
-        "target_to_date": 0.97,
-        "monthly_target": 5.0,
-        "rain_mtd": 0.26,
-        "forecast_inches": 0.02,
-        "max_daily_inches": 0.05,
-        "freeze_block": False,
-    }
-    defaults.update(overrides)
-    return Evaluation(**defaults)  # type: ignore[arg-type]
 
 
 def test_format_duration_minutes() -> None:
@@ -84,13 +66,13 @@ def test_relay_label_block() -> None:
 
 
 def test_format_deficit_formula() -> None:
-    evaluation = _evaluation(
+    ev = evaluation(
         target_to_date=0.97,
         rain_mtd=0.26,
         forecast_inches=0.02,
         deficit=0.05,
     )
-    text = format_deficit_formula(evaluation, 0.63, 0.3)
+    text = format_deficit_formula(ev, 0.63, 0.3)
     assert "0.97 − 0.26 − 0.63 − 0.02 = 0.05 in" in text
     assert "need ≥ 0.30 to allow" in text
 
@@ -100,12 +82,12 @@ def test_format_updated_without_now() -> None:
 
 
 def test_format_safety_gate_storm_block() -> None:
-    evaluation = _evaluation(safety_ok=False, freeze_block=False, max_daily_inches=0.25)
-    assert format_safety_gate(evaluation, safety_known=True) == "block (storm / heavy rain)"
+    ev = evaluation(safety_ok=False, freeze_block=False, max_daily_inches=0.25)
+    assert format_safety_gate(ev, safety_known=True) == "block (storm / heavy rain)"
 
 
 def test_format_safety_gate_unknown() -> None:
-    assert format_safety_gate(_evaluation(), safety_known=False) == (
+    assert format_safety_gate(evaluation(), safety_known=False) == (
         "unknown (not saved — run without --cached)"
     )
 
@@ -290,7 +272,6 @@ def test_format_status_live_without_weather_payload(settings, monkeypatch) -> No
     patch_local_today(monkeypatch, date(2024, 7, 15))
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     preview_result = Preview(
-        effective_state=State(),
         irrigation_mtd=0.0,
         sewer_lockout=False,
         live=None,

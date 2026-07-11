@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from rain_bypass import config
 from rain_bypass.balance import month_start
-from rain_bypass.config import Location, Settings
+from rain_bypass.config import Settings
 
 
 def event_lookback_window(settings: Settings) -> tuple[date, date]:
@@ -52,7 +52,3 @@ def seconds_until_next_check(settings: Settings, *, now: datetime | None = None)
     if current >= target:
         target += timedelta(days=1)
     return (target - current).total_seconds()
-
-
-def timeline_location_path(location: Location) -> str:
-    return location.zip_code

@@ -127,6 +127,28 @@ def ensure_mdns(*, run_command: RunCommand | None = None) -> bool:
     return False
 
 
+def _write_systemd_unit(
+    unit_path: Path,
+    unit_name: str,
+    unit_content: str,
+    *,
+    runner: RunCommand,
+    enable: bool = True,
+    restart: bool = True,
+) -> None:
+    typer.echo(f"==> Installing {unit_path} (requires sudo)")
+    runner(
+        ["sudo", "tee", str(unit_path)],
+        input=unit_content.encode(),
+        check=True,
+    )
+    runner(["sudo", "systemctl", "daemon-reload"], check=True)
+    if enable:
+        runner(["sudo", "systemctl", "enable", unit_name], check=True)
+    if restart:
+        runner(["sudo", "systemctl", "restart", unit_name], check=True)
+
+
 def install_dashboard_unit(
     root: Path,
     python: Path,
@@ -152,15 +174,12 @@ def install_dashboard_unit(
     service_user = detect_service_user(run_command=runner, prompter=prompter)
 
     unit_path = Path(f"/etc/systemd/system/{DASHBOARD_SERVICE_NAME}.service")
-    typer.echo(f"==> Installing {unit_path} (requires sudo)")
-    runner(
-        ["sudo", "tee", str(unit_path)],
-        input=render_dashboard_unit(root, python, settings, service_user).encode(),
-        check=True,
+    _write_systemd_unit(
+        unit_path,
+        DASHBOARD_SERVICE_NAME,
+        render_dashboard_unit(root, python, settings, service_user),
+        runner=runner,
     )
-    runner(["sudo", "systemctl", "daemon-reload"], check=True)
-    runner(["sudo", "systemctl", "enable", DASHBOARD_SERVICE_NAME], check=True)
-    runner(["sudo", "systemctl", "restart", DASHBOARD_SERVICE_NAME], check=True)
     typer.echo(f"==> Dashboard enabled. Status: sudo systemctl status {DASHBOARD_SERVICE_NAME}")
     ensure_mdns(run_command=runner)
 
@@ -245,17 +264,21 @@ def install_autoupdate(
     service_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.service")
     timer_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.timer")
     typer.echo(f"==> Installing {service_path} and {timer_path} (requires sudo)")
-    runner(
-        ["sudo", "tee", str(service_path)],
-        input=render_autoupdate_service(root, service_user).encode(),
-        check=True,
+    _write_systemd_unit(
+        service_path,
+        AUTO_UPDATE_SERVICE_NAME,
+        render_autoupdate_service(root, service_user),
+        runner=runner,
+        restart=False,
     )
-    runner(
-        ["sudo", "tee", str(timer_path)],
-        input=render_autoupdate_timer().encode(),
-        check=True,
+    _write_systemd_unit(
+        timer_path,
+        f"{AUTO_UPDATE_SERVICE_NAME}.timer",
+        render_autoupdate_timer(),
+        runner=runner,
+        enable=False,
+        restart=False,
     )
-    runner(["sudo", "systemctl", "daemon-reload"], check=True)
     runner(
         ["sudo", "systemctl", "enable", "--now", f"{AUTO_UPDATE_SERVICE_NAME}.timer"], check=True
     )
@@ -285,13 +308,10 @@ def install_systemd_unit(
     service_user = detect_service_user(run_command=runner, prompter=prompter)
 
     unit_path = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
-    typer.echo(f"==> Installing {unit_path} (requires sudo)")
-    runner(
-        ["sudo", "tee", str(unit_path)],
-        input=render_systemd_unit(root, python, settings, service_user).encode(),
-        check=True,
+    _write_systemd_unit(
+        unit_path,
+        SERVICE_NAME,
+        render_systemd_unit(root, python, settings, service_user),
+        runner=runner,
     )
-    runner(["sudo", "systemctl", "daemon-reload"], check=True)
-    runner(["sudo", "systemctl", "enable", SERVICE_NAME], check=True)
-    runner(["sudo", "systemctl", "restart", SERVICE_NAME], check=True)
     typer.echo(f"==> Service enabled. Status: sudo systemctl status {SERVICE_NAME}")

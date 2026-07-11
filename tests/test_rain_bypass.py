@@ -29,7 +29,6 @@ from rain_bypass.weather import (
     fetch_weather,
     freeze_block_for_days,
     max_daily_precip,
-    parse_vc_datetime,
     resolve_location,
     sum_precip,
     timeline_params,
@@ -182,14 +181,6 @@ def test_max_daily_precip():
     assert max_daily_precip(days, date(2024, 6, 1), date(2024, 6, 2)) == pytest.approx(0.4)
 
 
-def test_parse_vc_datetime_variants():
-    tz = "America/Chicago"
-    assert parse_vc_datetime("2024-06-10", tz).date() == date(2024, 6, 10)
-    assert parse_vc_datetime("2024-06-10T04:30:00", tz).hour == 4
-    aware = datetime(2024, 6, 10, 4, 30, tzinfo=ZoneInfo("UTC"))
-    assert parse_vc_datetime(aware.isoformat(), tz).tzinfo is not None
-
-
 def test_sum_precip_sums_inches():
     days = [
         timeline_day(datetime="2024-06-01", precip=0.1),
@@ -265,7 +256,6 @@ def test_decide_allows_when_balance_and_safety_ok(settings, monkeypatch):
     assert decision.evaluation is not None
     assert decision.evaluation.balance_ok is True
     assert decision.evaluation.rain_mtd == pytest.approx(0.0)
-    assert decision.irrigation_inches_mtd == pytest.approx(0.0)
 
 
 def test_state_load_strips_legacy_irrigation_fields(tmp_path):

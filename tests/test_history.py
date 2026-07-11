@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from conftest import patch_local_today, weather_snapshot
+from conftest import evaluation, patch_local_today, weather_snapshot
 from typer.testing import CliRunner
 
 from rain_bypass.cli import app
@@ -24,24 +24,7 @@ from rain_bypass.history import (
     print_history,
 )
 from rain_bypass.logic import decide
-from rain_bypass.models import Decision, Evaluation
-
-
-def _evaluation(**overrides: object) -> Evaluation:
-    defaults: dict[str, object] = {
-        "watering_required": True,
-        "balance_ok": True,
-        "safety_ok": True,
-        "deficit": 0.4,
-        "target_to_date": 1.0,
-        "monthly_target": 5.0,
-        "rain_mtd": 0.2,
-        "forecast_inches": 0.0,
-        "max_daily_inches": 0.0,
-        "freeze_block": False,
-    }
-    defaults.update(overrides)
-    return Evaluation(**defaults)  # type: ignore[arg-type]
+from rain_bypass.models import Decision
 
 
 def test_history_path_default(settings):
@@ -59,9 +42,7 @@ def test_build_record_credits_allow(settings, monkeypatch):
     patch_local_today(monkeypatch, date(2024, 7, 15))
     decision = Decision(
         watering_required=True,
-        evaluation=_evaluation(),
-        balance_month=7,
-        irrigation_inches_mtd=0.0,
+        evaluation=evaluation(),
         error=None,
     )
     record = build_record(settings, State(), decision, checked_at=1_700_000_000.0)
@@ -77,8 +58,6 @@ def test_build_record_sewer_lockout(settings, monkeypatch):
     decision = Decision(
         watering_required=False,
         evaluation=None,
-        balance_month=2,
-        irrigation_inches_mtd=0.0,
         error=None,
     )
     record = build_record(settings, State(), decision)
@@ -91,8 +70,6 @@ def test_build_record_weather_error(settings, monkeypatch):
     decision = Decision(
         watering_required=False,
         evaluation=None,
-        balance_month=7,
-        irrigation_inches_mtd=0.5,
         error="api down",
     )
     state = State(rainfall_inches=0.42, forecast_inches=0.1)
@@ -462,7 +439,7 @@ def test_format_allowed_branches():
             sewer_lockout=True,
         )
     )
-    assert "weather error" in _format_allowed(
+    assert "weather" in _format_allowed(
         WateringRecord(
             checked_at=1.0,
             local_date="2024-07-01",

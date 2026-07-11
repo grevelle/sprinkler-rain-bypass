@@ -190,6 +190,12 @@ def in_sewer_lockout(sewer: SewerLockout, today: date) -> bool:
     return start <= today <= end
 
 
+def format_sewer_range(sewer: SewerLockout) -> str:
+    return (
+        f"{sewer.start_month:02d}/{sewer.start_day:02d}-{sewer.end_month:02d}/{sewer.end_day:02d}"
+    )
+
+
 def load_settings(config_path: Path | str) -> Settings:
     path = Path(config_path)
     if not path.is_file():
