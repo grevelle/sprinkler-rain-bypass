@@ -196,6 +196,18 @@ def test_render_dashboard_html_empty_history(settings, settings_path: Path, monk
     monkeypatch.setattr("rain_bypass.web.gather_status", lambda *_a, **_k: snapshot)
     html_text = render_dashboard_html(build_dashboard_view(settings_path))
     assert "No watering history yet." in html_text
+    assert "Awaiting weather" in html_text
+
+
+def test_render_dashboard_html_updated_pill(settings, settings_path: Path, monkeypatch) -> None:
+    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
+    state = State(watering_required=True, last_weather_update=1_721_000_000.0)
+    preview = _preview(effective_state=state)
+    snapshot = _snapshot(settings, preview=preview)
+    monkeypatch.setattr("rain_bypass.web.gather_status", lambda *_a, **_k: snapshot)
+    html_text = render_dashboard_html(build_dashboard_view(settings_path))
+    assert "Updated " in html_text
+    assert "Awaiting weather" not in html_text
 
 
 def _free_port() -> int:
