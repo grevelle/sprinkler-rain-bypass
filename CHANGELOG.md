@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Architecture SSOT** — weather persistence (`persisted_weather`), verdict labels (`verdict_badge`), balance display (`balance_display`), and legacy state key stripping consolidated; net fewer `src/` lines, no behavior change.
+- **Architecture polish (9.8+)** — `format_status` live/saved branches both route through `_append_weather_and_balance`; dashboard HTML extracted to `dashboard_html.py` (`web.py` = view assembly + HTTP only). Docs updated. No behavior change.
 - **Watering history** — `watering_history.jsonl` is the single source of truth for irrigation credited this month; each control cycle appends a record, entries older than one year are pruned on append; view with `rain-bypass history`. Legacy `irrigation_inches_mtd` in `state.json` migrates into history on first run.
 - **Internal simplification** — dead code removed; **vulture** dead-code gate in CI; dashboard CSS moved to `src/rain_bypass/static/dashboard.css`; shared shell helpers in `scripts/lib/common.sh`; display helpers consolidated in `history` / `status` / `config` (`watering_verdict`, `format_inches`, `format_sewer_range`).
 - **Test suite** — reorganized into domain-split modules (`test_weather`, `test_windows`, `test_controller`, `test_gpio`, slim `test_rain_bypass`); parametrized variant tests; shared `watering_record` / `build_dashboard` fixtures in `conftest.py`. 100% branch coverage unchanged.

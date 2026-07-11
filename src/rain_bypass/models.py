@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from rain_bypass.config import State
+
 
 @dataclass(frozen=True, slots=True)
 class WeatherSnapshot:
@@ -9,6 +11,17 @@ class WeatherSnapshot:
     forecast_inches: float
     max_daily_inches: float
     freeze_block: bool
+
+    @classmethod
+    def from_state(cls, state: State) -> WeatherSnapshot | None:
+        if state.rainfall_inches is None or state.forecast_inches is None:
+            return None
+        return cls(
+            rain_mtd=state.rainfall_inches,
+            forecast_inches=state.forecast_inches,
+            max_daily_inches=state.max_daily_inches or 0.0,
+            freeze_block=bool(state.freeze_block),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,3 +69,26 @@ class Decision:
     watering_required: bool
     evaluation: Evaluation | None
     error: str | None
+
+
+def persisted_weather(
+    decision: Decision,
+    state: State,
+) -> tuple[float | None, float | None, float | None, bool | None]:
+    match decision.evaluation:
+        case Evaluation() as evaluation:
+            return (
+                evaluation.rain_mtd,
+                evaluation.forecast_inches,
+                evaluation.max_daily_inches,
+                evaluation.freeze_block,
+            )
+        case _ if decision.error is not None:
+            return (
+                state.rainfall_inches,
+                state.forecast_inches,
+                state.max_daily_inches,
+                state.freeze_block,
+            )
+        case _:
+            return None, None, None, None

@@ -16,8 +16,9 @@ from rain_bypass.config import (
     Settings,
     State,
     load_settings,
+    strip_legacy_state_keys,
 )
-from rain_bypass.models import Decision
+from rain_bypass.models import Decision, persisted_weather
 
 HISTORY_RETENTION = timedelta(days=365)
 
@@ -67,16 +68,15 @@ def build_record(
     credited = settings.balance.inches_per_cycle if decision.watering_required else 0.0
     after_mtd = before_mtd + credited
     evaluation = decision.evaluation
+    rain_mtd, forecast_inches, _, _ = persisted_weather(decision, state_before)
     return WateringRecord(
         checked_at=when,
         local_date=today.isoformat(),
         allowed=decision.watering_required,
         inches_credited=credited,
         irrigation_mtd=after_mtd,
-        rain_mtd=evaluation.rain_mtd if evaluation is not None else state_before.rainfall_inches,
-        forecast_inches=(
-            evaluation.forecast_inches if evaluation is not None else state_before.forecast_inches
-        ),
+        rain_mtd=rain_mtd,
+        forecast_inches=forecast_inches,
         deficit=evaluation.deficit if evaluation is not None else None,
         sewer_lockout=sewer,
         weather_error=decision.error,
@@ -169,8 +169,7 @@ def migrate_legacy_irrigation(settings: Settings) -> None:
 def _strip_legacy_irrigation_fields(state_path: Path, raw: dict[str, Any]) -> None:
     if "irrigation_inches_mtd" not in raw and "balance_month" not in raw:
         return
-    raw.pop("irrigation_inches_mtd", None)
-    raw.pop("balance_month", None)
+    strip_legacy_state_keys(raw)
     state_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
 
 
@@ -183,14 +182,31 @@ def load_records(path: Path, *, limit: int = 30) -> list[WateringRecord]:
     return records[-limit:]
 
 
-def watering_verdict(record: WateringRecord) -> tuple[str, str]:
-    if record.sewer_lockout:
-        return "BLOCK (sewer)", "block"
-    if record.weather_error:
-        return "BLOCK (weather)", "block"
-    if record.allowed:
+def verdict_badge(
+    *,
+    allowed: bool | None,
+    sewer_lockout: bool = False,
+    weather_error: str | None = None,
+    detail: bool = True,
+) -> tuple[str, str]:
+    if sewer_lockout:
+        return ("BLOCK (sewer)" if detail else "BLOCK", "block")
+    if weather_error:
+        return ("BLOCK (weather)" if detail else "BLOCK", "block")
+    if allowed is None:
+        return "UNKNOWN", "unknown"
+    if allowed:
         return "ALLOW", "allow"
     return "BLOCK", "block"
+
+
+def watering_verdict(record: WateringRecord) -> tuple[str, str]:
+    return verdict_badge(
+        allowed=record.allowed,
+        sewer_lockout=record.sewer_lockout,
+        weather_error=record.weather_error,
+        detail=True,
+    )
 
 
 def watering_record_details(record: WateringRecord) -> str:

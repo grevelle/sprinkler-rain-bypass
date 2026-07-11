@@ -442,7 +442,7 @@ flowchart TD
   balance -->|yes| safety{safety_ok?<br/>no freeze / storm}
   safety -->|no| blockSafe[BLOCK]
   safety -->|yes| allow[ALLOW — credit inches_per_cycle]
-  blockSewer --> persist[Append history + save state.json]
+  blockSewer --> persist[Append history + persisted_weather / state.json]
   blockFail --> persist
   keep --> persist
   blockBal --> persist
@@ -495,6 +495,13 @@ flowchart TB
     installer["rain-bypass-install<br/>install_cli.py"]
   end
 
+  subgraph ssot [Shared SSOT]
+    models["models.py<br/>from_state, persisted_weather"]
+    historySSOT["history.py<br/>verdict_badge"]
+    balanceSSOT["balance.py<br/>balance_display"]
+    configSSOT["config.py<br/>strip_legacy_state_keys"]
+  end
+
   subgraph loop [Control loop]
     controller[controller.py<br/>run / tick]
     logic[logic.py<br/>decide / preview / evaluate_weather]
@@ -511,7 +518,8 @@ flowchart TB
 
   subgraph views [Read-only views]
     status[status.py]
-    web["web.py + static/dashboard.css"]
+    web["web.py + dashboard_html.py"]
+    webHtml["dashboard_html.py<br/>render_dashboard_html"]
   end
 
   subgraph deployMod [Deploy]
@@ -527,38 +535,61 @@ flowchart TB
   controller --> logic
   controller --> gpio
   controller --> history
+  controller --> models
   logic --> weather
   logic --> balance
   logic --> windows
   logic --> history
+  logic --> models
+  history --> models
   status --> logic
+  status --> balanceSSOT
+  status --> history
   web --> status
-  web --> history
+  web --> historySSOT
+  web --> balanceSSOT
+  web --> webHtml
   weather --> windows
   config --> logic
+  configSSOT --> history
 ```
 
 | Layer | Modules | Role |
 | ----- | ------- | ---- |
 | **Core** | `paths`, `config`, `models`, `balance`, `windows`, `weather`, `logic`, `controller`, `gpio` | Daily check loop, weather fetch, balance math, relay control |
-| **Persistence & views** | `history`, `status`, `web` | Append-only decision log; CLI status; HTML dashboard (`static/dashboard.css`) |
+| **Persistence & views** | `history`, `status`, `web`, `dashboard_html` | Append-only decision log; CLI status; dashboard view model + HTTP server; HTML templates |
 | **CLI** | `cli`, `__main__` | `rain-bypass` — run, status, history, serve |
 | **Installer** | `install_cli`, `install_flow`, `install_prompts`, `prompting` | Interactive setup wizard (`rain-bypass-install`) |
-| **Deploy** | `deploy` | systemd units, mDNS/Avahi, auto-update timer |
+| **Deploy** | `deploy` | systemd units (`_install_unit_if_confirmed`), mDNS/Avahi, auto-update timer |
 | **Support** | `platform`, `logging_setup`, `exceptions` | Pi detection, logging, shared errors |
 
-**Shared display helpers** (single source of truth for CLI, history, and web):
+**Shared SSOT helpers** (single source of truth for CLI, history, and web):
 
 | Helper | Module | Used by |
 | ------ | ------ | ------- |
-| `watering_verdict()` / `watering_record_details()` | `history.py` | `history` CLI, web dashboard rows |
+| `WeatherSnapshot.from_state()` | `models.py` | `logic.preview` (cached weather) |
+| `persisted_weather()` | `models.py` | `controller.tick`, `history.build_record` |
+| `verdict_badge()` / `watering_verdict()` / `watering_record_details()` | `history.py` | Web hero + history rows, `history` CLI |
+| `balance_display()` | `balance.py` | Web dashboard balance card, `status` CLI |
 | `format_inches()` | `status.py` | status CLI, web dashboard |
 | `format_sewer_range()` | `config.py` | status, web |
+| `strip_legacy_state_keys()` | `config.py` | `State.load`, legacy migration |
 | `gather_status()` / `preview()` | `status.py` / `logic.py` | status CLI, web dashboard |
+| `_append_weather_and_balance()` | `status.py` | live + saved evaluation sections in `format_status` |
+| `render_dashboard_html()` | `dashboard_html.py` | mobile HTML page (`web` HTTP server) |
 
+Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from badge labels — different copy for CLI vs phone UI, not duplicate logic.
+
+**Installer layout** (`install_cli` → prompts → flow → deploy) is a deliberate three-layer split: thin Typer entry, interactive prompts, and orchestration — not duplicated logic.
+
+- **`models`** — `WeatherSnapshot`, `Evaluation`, `Preview`, `Decision`; weather persistence helpers (`from_state`, `persisted_weather`).
+- **`balance`** — prorated monthly targets **and** shared balance display (`BalanceDisplay` / `balance_display`).
+- **`history`** — `verdict_badge` is the single ALLOW/BLOCK label tree (web hero uses `detail=False`).
 - **`weather`** — Visual Crossing Timeline API via httpx; responses validated as Pydantic `TimelineDay` before balance math.
 - **`logic`** — `decide()` runs the full control pipeline; `preview()` / `evaluate_weather()` power read-only status and web views.
 - **`controller`** — `tick()` calls `decide()`, sets GPIO, appends history, saves `state.json`; `run()` loops until the next check time.
+- **`web`** — builds `DashboardView` from status/history SSOT helpers; delegates HTML to `dashboard_html.render_dashboard_html`.
+- **`dashboard_html`** — dashboard DTOs (`DashboardView`, etc.) and HTML template rendering; CSS from `static/dashboard.css`.
 - **`install_cli`** — thin Typer entry point; prompts in `install_prompts`, flow in `install_flow`, shared prompters in `prompting`.
 - **`settings.example.toml`** — canonical defaults for install, tests, and `rain_bypass.config`.
 
@@ -566,7 +597,7 @@ flowchart TB
 
 | Path | Purpose |
 | ---- | ------- |
-| `src/rain_bypass/` | Application source (~22 modules + `static/dashboard.css`) |
+| `src/rain_bypass/` | Application source (~23 modules + `static/dashboard.css`) |
 | `tests/test_rain_bypass.py` | Config + `decide()` integration smoke |
 | `tests/test_weather.py` | Visual Crossing client, precip helpers |
 | `tests/test_windows.py` | Date windows, scheduled check timing |
@@ -575,7 +606,7 @@ flowchart TB
 | `tests/test_logic.py` | `preview` / `evaluate_weather` |
 | `tests/test_history.py` | Watering log, verdict/details helpers |
 | `tests/test_status.py` | Text status formatting |
-| `tests/test_web.py` | HTML dashboard |
+| `tests/test_web.py` | HTML dashboard (view + HTTP server) |
 | `tests/test_balance.py`, `test_config_io.py`, … | Focused unit tests |
 | `tests/conftest.py` | Shared fixtures and factories |
 | `scripts/ci.sh` / `ci.ps1` | Local CI gate (mirrors GitHub Actions) |

@@ -5,6 +5,7 @@ import shutil
 import socket
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import typer
@@ -149,6 +150,40 @@ def _write_systemd_unit(
         runner(["sudo", "systemctl", "restart", unit_name], check=True)
 
 
+def _install_unit_if_confirmed(
+    *,
+    unit_name: str,
+    unit_filename: str,
+    render: Callable[[str], str],
+    confirm_prompt: str,
+    success_message: str,
+    skip_warning: str,
+    prompter: Prompter,
+    runner: RunCommand,
+    post_install: Callable[[], None] | None = None,
+    enable: bool = True,
+    restart: bool = True,
+) -> None:
+    if shutil.which("systemctl") is None:
+        typer.secho(skip_warning, fg=typer.colors.YELLOW)
+        return
+    if not prompter.confirm(confirm_prompt, default=True):
+        return
+    service_user = detect_service_user(run_command=runner, prompter=prompter)
+    unit_path = Path(f"/etc/systemd/system/{unit_filename}")
+    _write_systemd_unit(
+        unit_path,
+        unit_name,
+        render(service_user),
+        runner=runner,
+        enable=enable,
+        restart=restart,
+    )
+    typer.echo(success_message)
+    if post_install is not None:
+        post_install()
+
+
 def install_dashboard_unit(
     root: Path,
     python: Path,
@@ -158,30 +193,24 @@ def install_dashboard_unit(
     run_command: RunCommand | None = None,
 ) -> None:
     runner: RunCommand = run_command or subprocess.run
-    if shutil.which("systemctl") is None:
-        typer.secho(
-            "warning: systemctl not found; skipping dashboard service install.",
-            fg=typer.colors.YELLOW,
-        )
-        return
+
+    def _post_mdns() -> None:
+        ensure_mdns(run_command=runner)
+
     hostname = system_hostname()
-    if not prompter.confirm(
-        f"Install dashboard + mDNS (phone status at http://{hostname}.local/)?",
-        default=True,
-    ):
-        return
-
-    service_user = detect_service_user(run_command=runner, prompter=prompter)
-
-    unit_path = Path(f"/etc/systemd/system/{DASHBOARD_SERVICE_NAME}.service")
-    _write_systemd_unit(
-        unit_path,
-        DASHBOARD_SERVICE_NAME,
-        render_dashboard_unit(root, python, settings, service_user),
+    _install_unit_if_confirmed(
+        unit_name=DASHBOARD_SERVICE_NAME,
+        unit_filename=f"{DASHBOARD_SERVICE_NAME}.service",
+        render=lambda user: render_dashboard_unit(root, python, settings, user),
+        confirm_prompt=(f"Install dashboard + mDNS (phone status at http://{hostname}.local/)?"),
+        success_message=(
+            f"==> Dashboard enabled. Status: sudo systemctl status {DASHBOARD_SERVICE_NAME}"
+        ),
+        skip_warning="warning: systemctl not found; skipping dashboard service install.",
+        prompter=prompter,
         runner=runner,
+        post_install=_post_mdns,
     )
-    typer.echo(f"==> Dashboard enabled. Status: sudo systemctl status {DASHBOARD_SERVICE_NAME}")
-    ensure_mdns(run_command=runner)
 
 
 def install_unattended_upgrades(*, run_command: RunCommand | None = None) -> None:
@@ -297,21 +326,13 @@ def install_systemd_unit(
     run_command: RunCommand | None = None,
 ) -> None:
     runner: RunCommand = run_command or subprocess.run
-    if shutil.which("systemctl") is None:
-        typer.secho(
-            "warning: systemctl not found; skipping service install.", fg=typer.colors.YELLOW
-        )
-        return
-    if not prompter.confirm(f"Install and enable systemd service ({SERVICE_NAME})?", default=True):
-        return
-
-    service_user = detect_service_user(run_command=runner, prompter=prompter)
-
-    unit_path = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
-    _write_systemd_unit(
-        unit_path,
-        SERVICE_NAME,
-        render_systemd_unit(root, python, settings, service_user),
+    _install_unit_if_confirmed(
+        unit_name=SERVICE_NAME,
+        unit_filename=f"{SERVICE_NAME}.service",
+        render=lambda user: render_systemd_unit(root, python, settings, user),
+        confirm_prompt=f"Install and enable systemd service ({SERVICE_NAME})?",
+        success_message=f"==> Service enabled. Status: sudo systemctl status {SERVICE_NAME}",
+        skip_warning="warning: systemctl not found; skipping service install.",
+        prompter=prompter,
         runner=runner,
     )
-    typer.echo(f"==> Service enabled. Status: sudo systemctl status {SERVICE_NAME}")

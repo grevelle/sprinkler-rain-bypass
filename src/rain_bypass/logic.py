@@ -94,17 +94,6 @@ def evaluate_weather(
     )
 
 
-def _snapshot_from_state(state: State) -> WeatherSnapshot | None:
-    if state.rainfall_inches is None or state.forecast_inches is None:
-        return None
-    return WeatherSnapshot(
-        rain_mtd=state.rainfall_inches,
-        forecast_inches=state.forecast_inches,
-        max_daily_inches=state.max_daily_inches or 0.0,
-        freeze_block=bool(state.freeze_block),
-    )
-
-
 def _safety_fields_saved(state: State) -> bool:
     return state.max_daily_inches is not None and state.freeze_block is not None
 
@@ -140,7 +129,7 @@ def preview(settings: Settings, state: State, *, fetch_live: bool = True) -> Pre
 
     if not fetch_live:
         cached = state.watering_required if state.watering_required is not None else None
-        saved = _snapshot_from_state(state)
+        saved = WeatherSnapshot.from_state(state)
         if saved is None:
             return _build_preview(irrigation_mtd_value=ctx.irr, cached_verdict=cached)
         safety_known = _safety_fields_saved(state)

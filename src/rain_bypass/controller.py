@@ -8,39 +8,16 @@ from rain_bypass.config import Settings, State
 from rain_bypass.gpio import PinFactory, watering_pins
 from rain_bypass.history import append_watering_history, migrate_legacy_irrigation
 from rain_bypass.logic import decide
-from rain_bypass.models import Decision, Evaluation
+from rain_bypass.models import persisted_weather
 
 logger = logging.getLogger(__name__)
-
-
-def _weather_fields(
-    decision: Decision,
-    state: State,
-) -> tuple[float | None, float | None, float | None, bool | None]:
-    match decision.evaluation:
-        case Evaluation() as evaluation:
-            return (
-                evaluation.rain_mtd,
-                evaluation.forecast_inches,
-                evaluation.max_daily_inches,
-                evaluation.freeze_block,
-            )
-        case _ if decision.error is not None:
-            return (
-                state.rainfall_inches,
-                state.forecast_inches,
-                state.max_daily_inches,
-                state.freeze_block,
-            )
-        case _:
-            return None, None, None, None
 
 
 def tick(settings: Settings, state: State, apply: Callable[[bool], None]) -> State:
     decision = decide(settings, state)
     apply(decision.watering_required)
     append_watering_history(settings, state, decision)
-    rainfall_inches, forecast_inches, max_daily_inches, freeze_block = _weather_fields(
+    rainfall_inches, forecast_inches, max_daily_inches, freeze_block = persisted_weather(
         decision, state
     )
     updated = state.model_copy(

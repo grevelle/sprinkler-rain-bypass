@@ -18,6 +18,14 @@ from rain_bypass.paths import repo_root
 
 EXAMPLE_SETTINGS_PATH = repo_root() / "settings.example.toml"
 
+LEGACY_STATE_KEYS = ("blocked_until", "irrigation_inches_mtd", "balance_month")
+
+
+def strip_legacy_state_keys(data: dict[str, Any]) -> None:
+    for key in LEGACY_STATE_KEYS:
+        data.pop(key, None)
+
+
 DEFAULT_MONTHLY_TARGETS: dict[int, float] = {
     1: 0.0,
     2: 0.0,
@@ -170,9 +178,7 @@ class State(FrozenModel):
         raw = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
             data = cast(dict[str, Any], raw)
-            data.pop("blocked_until", None)
-            data.pop("irrigation_inches_mtd", None)
-            data.pop("balance_month", None)
+            strip_legacy_state_keys(data)
             return cls.model_validate(data)
         return cls.model_validate(raw)
 

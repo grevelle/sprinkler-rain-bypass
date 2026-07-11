@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import typer
 
+from rain_bypass.balance import balance_display
 from rain_bypass.config import Settings, State, format_sewer_range, load_settings
 from rain_bypass.logic import preview
 from rain_bypass.models import Evaluation, Preview
@@ -62,11 +63,7 @@ def relay_label(allowed: bool | None) -> str:
 def format_deficit_formula(
     evaluation: Evaluation, irrigation_mtd: float, inches_per_cycle: float
 ) -> str:
-    return (
-        f"{evaluation.target_to_date:.2f} − {evaluation.rain_mtd:.2f} − "
-        f"{irrigation_mtd:.2f} − {evaluation.forecast_inches:.2f} = "
-        f"{evaluation.deficit:.2f} in (need ≥ {inches_per_cycle:.2f} to allow)"
-    )
+    return balance_display(evaluation, irrigation_mtd, inches_per_cycle=inches_per_cycle).formula
 
 
 def format_safety_gate(evaluation: Evaluation, *, safety_known: bool) -> str:
@@ -177,6 +174,40 @@ def _append_weather_metrics(
         lines.append(_line("Freeze block", "yes" if freeze_block else "no"))
 
 
+def _append_weather_and_balance(
+    lines: list[str],
+    *,
+    month_name: str,
+    evaluation: Evaluation,
+    irrigation_mtd: float,
+    inches_per_cycle: float,
+    forecast_days: int,
+    safety_known: bool,
+    rain_mtd: float,
+    forecast_inches: float,
+    max_daily_inches: float | None,
+    freeze_block: bool | None,
+    saved: bool,
+) -> None:
+    _append_weather_metrics(
+        lines,
+        rain_mtd=rain_mtd,
+        forecast_inches=forecast_inches,
+        forecast_days=forecast_days,
+        max_daily_inches=max_daily_inches,
+        freeze_block=freeze_block,
+        saved=saved,
+    )
+    _append_balance_section(
+        lines,
+        month_name=month_name,
+        evaluation=evaluation,
+        irrigation_mtd=irrigation_mtd,
+        inches_per_cycle=inches_per_cycle,
+        safety_known=safety_known,
+    )
+
+
 def format_status(snapshot: StatusSnapshot) -> str:
     settings = snapshot.settings
     loc = settings.location
@@ -230,6 +261,22 @@ def format_status(snapshot: StatusSnapshot) -> str:
         lines.append(_line("Sewer lockout", "inactive"))
         if pv.live_error:
             lines.append(_line("Weather API", f"error — {pv.live_error}"))
+        elif pv.live is not None and pv.evaluation is not None:
+            live = pv.live
+            _append_weather_and_balance(
+                lines,
+                month_name=month_name,
+                evaluation=pv.evaluation,
+                irrigation_mtd=pv.irrigation_mtd,
+                inches_per_cycle=b.inches_per_cycle,
+                forecast_days=b.forecast_days,
+                safety_known=True,
+                rain_mtd=live.rain_mtd,
+                forecast_inches=live.forecast_inches,
+                max_daily_inches=live.max_daily_inches,
+                freeze_block=live.freeze_block,
+                saved=False,
+            )
         elif pv.live is not None:
             live = pv.live
             _append_weather_metrics(
@@ -241,7 +288,7 @@ def format_status(snapshot: StatusSnapshot) -> str:
                 freeze_block=live.freeze_block,
                 saved=False,
             )
-        if pv.evaluation is not None:
+        elif pv.evaluation is not None:
             _append_balance_section(
                 lines,
                 month_name=month_name,
@@ -253,22 +300,19 @@ def format_status(snapshot: StatusSnapshot) -> str:
     elif pv.from_saved_weather and pv.evaluation is not None:
         evaluation = pv.evaluation
         lines.extend(["", "Projected decision (saved weather, no API)"])
-        _append_weather_metrics(
-            lines,
-            rain_mtd=evaluation.rain_mtd,
-            forecast_inches=evaluation.forecast_inches,
-            forecast_days=b.forecast_days,
-            max_daily_inches=snapshot.state.max_daily_inches,
-            freeze_block=snapshot.state.freeze_block,
-            saved=True,
-        )
-        _append_balance_section(
+        _append_weather_and_balance(
             lines,
             month_name=month_name,
             evaluation=evaluation,
             irrigation_mtd=pv.irrigation_mtd,
             inches_per_cycle=b.inches_per_cycle,
+            forecast_days=b.forecast_days,
             safety_known=pv.safety_known,
+            rain_mtd=evaluation.rain_mtd,
+            forecast_inches=evaluation.forecast_inches,
+            max_daily_inches=snapshot.state.max_daily_inches,
+            freeze_block=snapshot.state.freeze_block,
+            saved=True,
         )
     else:
         lines.extend(

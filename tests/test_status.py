@@ -79,7 +79,7 @@ def test_format_deficit_formula() -> None:
         deficit=0.05,
     )
     text = format_deficit_formula(ev, 0.63, 0.3)
-    assert "0.97 − 0.26 − 0.63 − 0.02 = 0.05 in" in text
+    assert "0.97 - 0.26 - 0.63 - 0.02 = 0.05 in" in text
     assert "need ≥ 0.30 to allow" in text
 
 
@@ -305,6 +305,64 @@ def test_format_status_live_without_weather_payload(settings, monkeypatch) -> No
     text = format_status(snapshot)
     assert "Live evaluation" in text
     assert "Would decide now" in text
+
+
+def test_format_status_live_weather_only(settings, monkeypatch) -> None:
+    from rain_bypass.models import Preview
+    from rain_bypass.status import StatusSnapshot, format_status
+
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
+    snapshot = StatusSnapshot(
+        settings=settings,
+        state=State(),
+        local_time=fixed_now,
+        next_check_seconds=60.0,
+        preview=Preview(
+            irrigation_mtd=0.0,
+            sewer_lockout=False,
+            live=weather_snapshot(rain_mtd=0.5, forecast=0.1),
+            live_error=None,
+            evaluation=None,
+            cached_verdict=None,
+        ),
+        fetch_live=True,
+    )
+    text = format_status(snapshot)
+    assert "Rain MTD" in text
+    assert "0.50 in" in text
+    assert "Balance (" not in text
+
+
+def test_format_status_live_evaluation_only(settings, monkeypatch) -> None:
+    from rain_bypass.models import Preview
+    from rain_bypass.status import StatusSnapshot, format_status
+
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
+    snapshot = StatusSnapshot(
+        settings=settings,
+        state=State(),
+        local_time=fixed_now,
+        next_check_seconds=60.0,
+        preview=Preview(
+            irrigation_mtd=0.63,
+            sewer_lockout=False,
+            live=None,
+            live_error=None,
+            evaluation=evaluation(
+                target_to_date=0.97,
+                rain_mtd=0.26,
+                forecast_inches=0.02,
+                deficit=0.05,
+            ),
+            cached_verdict=None,
+        ),
+        fetch_live=True,
+    )
+    text = format_status(snapshot)
+    assert "Balance (July)" in text
+    assert "Formula" in text
 
 
 def test_format_status_weather_error(settings, monkeypatch) -> None:

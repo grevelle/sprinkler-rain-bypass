@@ -25,7 +25,7 @@ from typer.testing import CliRunner
 
 from rain_bypass.cli import app
 from rain_bypass.config import State, load_settings
-from rain_bypass.history import WateringRecord, append_record, history_path
+from rain_bypass.history import WateringRecord, append_record, history_path, verdict_badge
 from rain_bypass.models import Preview
 from rain_bypass.status import gather_status
 from rain_bypass.web import (
@@ -37,7 +37,6 @@ from rain_bypass.web import (
     _make_handler,
     _relay_short,
     _updated_meta,
-    _verdict_badge,
     build_dashboard_view,
     render_dashboard_html,
     run_server,
@@ -45,10 +44,10 @@ from rain_bypass.web import (
 
 
 def test_verdict_badge_allow_block_unknown() -> None:
-    assert _verdict_badge(True, sewer_lockout=False) == ("ALLOW", "allow")
-    assert _verdict_badge(False, sewer_lockout=False) == ("BLOCK", "block")
-    assert _verdict_badge(None, sewer_lockout=False) == ("UNKNOWN", "unknown")
-    assert _verdict_badge(True, sewer_lockout=True) == ("BLOCK", "block")
+    assert verdict_badge(allowed=True, detail=False) == ("ALLOW", "allow")
+    assert verdict_badge(allowed=False, detail=False) == ("BLOCK", "block")
+    assert verdict_badge(allowed=None, detail=False) == ("UNKNOWN", "unknown")
+    assert verdict_badge(allowed=True, sewer_lockout=True, detail=False) == ("BLOCK", "block")
 
 
 def test_dashboard_copy_helpers() -> None:
