@@ -169,14 +169,12 @@ def _relay_short(allowed: bool | None) -> str:
     return "Hardware relay closed — panel blocked"
 
 
-def _decision_short(would_water: bool | None, *, safety_known: bool) -> str:
-    if would_water is True:
-        return "Allow if panel runs today"
-    if would_water is False:
-        return "Skip today's cycle"
-    if not safety_known:
-        return "Safety unverified — refresh live weather"
-    return "Unknown — refresh live weather"
+def _decision_short(watering_required: bool | None) -> str:
+    if watering_required is True:
+        return "Watering allowed until next check"
+    if watering_required is False:
+        return "Watering blocked until next check"
+    return "Awaiting daily check"
 
 
 def _hero_subtitle(*, sewer_lockout: bool, decision_short: str) -> str:
@@ -231,12 +229,12 @@ def _build_balance(
     )
 
 
-def _verdict_badge(would_water: bool | None, *, sewer_lockout: bool) -> tuple[str, str]:
+def _verdict_badge(watering_required: bool | None, *, sewer_lockout: bool) -> tuple[str, str]:
     if sewer_lockout:
         return "BLOCK", "block"
-    if would_water is True:
+    if watering_required is True:
         return "ALLOW", "allow"
-    if would_water is False:
+    if watering_required is False:
         return "BLOCK", "block"
     return "UNKNOWN", "unknown"
 
@@ -253,8 +251,9 @@ def build_dashboard_view(
     preview = snapshot.preview
     loc = settings.location
     evaluation = preview.evaluation
+    daily_verdict = snapshot.state.watering_required
     verdict_label, verdict_class = _verdict_badge(
-        preview.would_water,
+        daily_verdict,
         sewer_lockout=preview.sewer_lockout,
     )
     forecast_days = settings.balance.forecast_days
@@ -283,10 +282,7 @@ def build_dashboard_view(
     rows = _collapse_history_rows(
         tuple(_history_row(record, loc.timezone) for record in reversed(records))
     )
-    decision = _decision_short(
-        preview.would_water,
-        safety_known=preview.safety_known,
-    )
+    decision = _decision_short(daily_verdict)
     return DashboardView(
         verdict_label=verdict_label,
         verdict_class=verdict_class,

@@ -75,9 +75,9 @@ def _preview(**overrides: object) -> Preview:
 def _snapshot(
     settings, *, preview: Preview | None = None, fetch_live: bool = False
 ) -> StatusSnapshot:
-    state = preview.effective_state if preview is not None else State()
     if preview is None:
         preview = _preview()
+    state = preview.effective_state
     now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo(settings.location.timezone))
     return StatusSnapshot(
         settings=settings,
@@ -105,14 +105,14 @@ def test_dashboard_copy_helpers() -> None:
     assert _relay_short(True) == "Hardware relay open — panel can run"
     assert _relay_short(False) == "Hardware relay closed — panel blocked"
     assert _relay_short(None) == "Relay status unknown"
-    assert _decision_short(True, safety_known=True) == "Allow if panel runs today"
-    assert _decision_short(False, safety_known=True) == "Skip today's cycle"
-    assert _decision_short(None, safety_known=False) == "Safety unverified — refresh live weather"
+    assert _decision_short(True) == "Watering allowed until next check"
+    assert _decision_short(False) == "Watering blocked until next check"
+    assert _decision_short(None) == "Awaiting daily check"
     assert _updated_meta("never") == "Awaiting weather"
     assert _updated_meta("2024-07-15").startswith("Updated ")
-    assert _hero_subtitle(sewer_lockout=True, decision_short="Skip today's cycle").startswith(
-        "Seasonal"
-    )
+    assert _hero_subtitle(
+        sewer_lockout=True, decision_short="Watering blocked until next check"
+    ).startswith("Seasonal")
     assert _collapse_history_rows(()) == ()
     row = DashboardHistoryRow(
         timestamp="2024-07-15 12:00",
@@ -122,10 +122,33 @@ def test_dashboard_copy_helpers() -> None:
         details="test",
     )
     assert len(_collapse_history_rows((row, row))) == 1
-    assert _hero_subtitle(sewer_lockout=False, decision_short="Skip today's cycle") == (
-        "Skip today's cycle"
+    assert _hero_subtitle(
+        sewer_lockout=False, decision_short="Watering blocked until next check"
+    ) == ("Watering blocked until next check")
+
+
+def test_build_dashboard_view_uses_daily_verdict_not_projection(
+    settings, settings_path: Path, monkeypatch
+) -> None:
+    """Hero follows saved relay state for the full check interval, not a live re-projection."""
+    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
+    state = State(
+        watering_required=True,
+        rainfall_inches=10.0,
+        forecast_inches=0.0,
+        max_daily_inches=0.0,
+        freeze_block=False,
     )
-    assert _decision_short(None, safety_known=True) == "Unknown — refresh live weather"
+    preview = _preview(
+        effective_state=state,
+        evaluation=_evaluation(watering_required=False, balance_ok=False, deficit=-7.0),
+    )
+    snapshot = _snapshot(settings, preview=preview)
+    monkeypatch.setattr("rain_bypass.web.gather_status", lambda *_a, **_k: snapshot)
+    view = build_dashboard_view(settings_path)
+    assert snapshot.preview.would_water is False
+    assert view.verdict_label == "ALLOW"
+    assert view.hero_subtitle == "Watering allowed until next check"
 
 
 def test_history_details_variants() -> None:
@@ -175,7 +198,7 @@ def test_build_dashboard_view_cached(settings, settings_path: Path, monkeypatch)
     assert view.mode_label == "Saved forecast"
     assert view.balance is not None
     assert view.balance.received
-    assert view.hero_subtitle == "Allow if panel runs today"
+    assert view.hero_subtitle == "Watering allowed until next check"
 
 
 def test_build_dashboard_view_balance_surplus(settings, settings_path: Path, monkeypatch) -> None:
