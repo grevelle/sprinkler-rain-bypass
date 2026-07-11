@@ -19,7 +19,14 @@ from rain_bypass.config import (
     write_settings,
 )
 from rain_bypass.controller import run
-from rain_bypass.deploy import SERVICE_NAME, install_autoupdate, install_systemd_unit
+from rain_bypass.deploy import (
+    DASHBOARD_SERVICE_NAME,
+    SERVICE_NAME,
+    install_autoupdate,
+    install_dashboard_unit,
+    install_systemd_unit,
+    system_hostname,
+)
 from rain_bypass.exceptions import WeatherError
 from rain_bypass.install_prompts import (
     load_prompt_defaults,
@@ -212,6 +219,9 @@ def run_install(
         install_systemd_unit(
             install_root, python, settings_path, prompter=prompts, run_command=run_command
         )
+        install_dashboard_unit(
+            install_root, python, settings_path, prompter=prompts, run_command=run_command
+        )
         if is_raspberry_pi():
             install_autoupdate(install_root, prompter=prompts, run_command=run_command)
 
@@ -228,6 +238,12 @@ def run_install(
     unit_path = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
     if unit_path.is_file():
         typer.echo(f"  Service: sudo systemctl status {SERVICE_NAME}")
+    dashboard_path = Path(f"/etc/systemd/system/{DASHBOARD_SERVICE_NAME}.service")
+    if dashboard_path.is_file():
+        host = system_hostname()
+        typer.echo(
+            f"  Dashboard: http://{host}.local/  (sudo systemctl status {DASHBOARD_SERVICE_NAME})"
+        )
 
 
 def handle_cli_errors(fn: CliHandler) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import socket
 from dataclasses import dataclass, field
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -9,12 +10,18 @@ import pytest
 
 from rain_bypass.deploy import (
     AUTO_UPDATE_SERVICE_NAME,
+    DASHBOARD_SERVICE_NAME,
+    ensure_mdns,
     install_autoupdate,
+    install_dashboard_unit,
     install_systemd_unit,
     install_unattended_upgrades,
     render_autoupdate_service,
     render_autoupdate_timer,
+    render_dashboard_unit,
     render_systemd_unit,
+    system_hostname,
+    verify_mdns,
 )
 from rain_bypass.prompting import detect_service_user
 
@@ -372,3 +379,229 @@ def test_install_unattended_upgrades_installs(monkeypatch):
         "tee",
         "/etc/apt/apt.conf.d/51unattended-upgrades-rain-bypass",
     ]
+
+
+def _avahi_resolver(name: str) -> str | None:
+    return "/usr/bin/avahi-resolve-host-name" if name == "avahi-resolve-host-name" else None
+
+
+def test_verify_mdns_avahi_resolve_failure(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", _avahi_resolver)
+
+    def fake_run(cmd, **kwargs):
+        return CompletedProcess(cmd, 1, stdout="")
+
+    monkeypatch.setattr("rain_bypass.deploy.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "rain_bypass.deploy.socket.getaddrinfo",
+        lambda *_a, **_k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.10", 80))],
+    )
+    assert verify_mdns("sprinkler", retries=1) is True
+
+
+def test_verify_mdns_avahi_empty_stdout(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", _avahi_resolver)
+
+    def fake_run(cmd, **kwargs):
+        return CompletedProcess(cmd, 0, stdout="   \n")
+
+    monkeypatch.setattr("rain_bypass.deploy.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "rain_bypass.deploy.socket.getaddrinfo",
+        lambda *_a, **_k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.10", 80))],
+    )
+    assert verify_mdns("sprinkler", retries=1) is True
+
+
+def test_ensure_mdns_without_systemctl(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: "/usr/bin/apt-get" if name == "apt-get" else None,
+    )
+    monkeypatch.setattr("rain_bypass.deploy.verify_mdns", lambda _host: True)
+    monkeypatch.setattr("rain_bypass.deploy.system_hostname", lambda: "sprinkler")
+    assert ensure_mdns(run_command=fake_run) is True
+    assert len(calls) == 1
+
+
+def test_verify_mdns_retries_before_success(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", lambda _name: None)
+    attempts = {"count": 0}
+
+    def getaddrinfo(*_args, **_kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise OSError("temporary mdns failure")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.10", 80))]
+
+    monkeypatch.setattr("rain_bypass.deploy.socket.getaddrinfo", getaddrinfo)
+    monkeypatch.setattr("rain_bypass.deploy.time.sleep", lambda _seconds: None)
+    assert verify_mdns("sprinkler", retries=2, delay_seconds=0) is True
+
+
+def test_verify_mdns_zero_retries(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", lambda _name: None)
+    assert verify_mdns("sprinkler", retries=0) is False
+
+
+def test_render_dashboard_unit():
+    text = render_dashboard_unit(
+        Path("/opt/app"),
+        Path("/opt/app/.venv/bin/python"),
+        Path("/opt/app/settings.toml"),
+        "pi",
+    )
+    assert "rain_bypass serve" in text
+    assert "CAP_NET_BIND_SERVICE" in text
+    assert "User=pi" in text
+
+
+def test_system_hostname(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.socket.gethostname", lambda: "Sprinkler")
+    assert system_hostname() == "sprinkler"
+
+
+def test_verify_mdns_with_avahi_resolve(monkeypatch):
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: (
+            "/usr/bin/avahi-resolve-host-name" if name == "avahi-resolve-host-name" else None
+        ),
+    )
+
+    def fake_run(cmd, **kwargs):
+        return CompletedProcess(cmd, 0, stdout="sprinkler.local\t192.168.1.10\n")
+
+    monkeypatch.setattr("rain_bypass.deploy.subprocess.run", fake_run)
+    assert verify_mdns("sprinkler") is True
+
+
+def test_verify_mdns_socket_fallback(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", lambda _name: None)
+    monkeypatch.setattr(
+        "rain_bypass.deploy.socket.getaddrinfo",
+        lambda *_a, **_k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.10", 80))],
+    )
+    assert verify_mdns("sprinkler", retries=1) is True
+
+
+def test_verify_mdns_failure(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", lambda _name: None)
+    monkeypatch.setattr(
+        "rain_bypass.deploy.socket.getaddrinfo",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("no mdns")),
+    )
+    assert verify_mdns("sprinkler", retries=1, delay_seconds=0) is False
+
+
+def test_ensure_mdns_skips_non_posix(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "nt")
+    assert ensure_mdns() is False
+
+
+def test_ensure_mdns_skips_without_apt(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", lambda _name: None)
+    assert ensure_mdns() is False
+
+
+def test_ensure_mdns_installs_and_verifies(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: (
+            f"/usr/bin/{name}"
+            if name in {"apt-get", "systemctl", "avahi-resolve-host-name"}
+            else None
+        ),
+    )
+    monkeypatch.setattr("rain_bypass.deploy.subprocess.run", fake_run)
+    monkeypatch.setattr("rain_bypass.deploy.verify_mdns", lambda _host: True)
+    monkeypatch.setattr("rain_bypass.deploy.system_hostname", lambda: "sprinkler")
+    assert ensure_mdns(run_command=fake_run) is True
+    assert calls[0][:4] == ["sudo", "apt-get", "install", "-y"]
+    assert "avahi-daemon" in calls[0]
+    assert calls[1] == ["sudo", "systemctl", "enable", "--now", "avahi-daemon"]
+
+
+def test_ensure_mdns_verify_warning(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"apt-get", "systemctl"} else None,
+    )
+    monkeypatch.setattr("rain_bypass.deploy.verify_mdns", lambda _host: False)
+    monkeypatch.setattr("rain_bypass.deploy.system_hostname", lambda: "sprinkler")
+    assert ensure_mdns(run_command=fake_run) is False
+
+
+def test_install_dashboard_unit_skips_without_systemctl(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", lambda _name: None)
+    install_dashboard_unit(
+        tmp_path,
+        tmp_path / ".venv/bin/python",
+        tmp_path / "settings.toml",
+        prompter=FakePrompter(confirms=[True]),
+    )
+
+
+def test_install_dashboard_unit_declined(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name == "systemctl" else None,
+    )
+    install_dashboard_unit(
+        tmp_path,
+        tmp_path / ".venv/bin/python",
+        tmp_path / "settings.toml",
+        prompter=FakePrompter(confirms=[False]),
+    )
+
+
+def test_install_dashboard_unit_installs(monkeypatch, tmp_path):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return CompletedProcess(cmd, 0, stdout=b"")
+
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"systemctl", "id"} else None,
+    )
+    monkeypatch.setattr("rain_bypass.deploy.ensure_mdns", lambda **_k: True)
+    monkeypatch.setattr("rain_bypass.deploy.system_hostname", lambda: "sprinkler")
+    install_dashboard_unit(
+        tmp_path,
+        tmp_path / ".venv/bin/python",
+        tmp_path / "settings.toml",
+        prompter=FakePrompter(confirms=[True]),
+        run_command=fake_run,
+    )
+    assert any(
+        len(cmd) >= 3
+        and cmd[0] == "sudo"
+        and cmd[1] == "tee"
+        and cmd[2].endswith(f"{DASHBOARD_SERVICE_NAME}.service")
+        for cmd in calls
+    )
+    assert ["sudo", "systemctl", "enable", DASHBOARD_SERVICE_NAME] in calls

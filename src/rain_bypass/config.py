@@ -138,6 +138,11 @@ class Runtime(FrozenModel):
         return value.upper()
 
 
+class Web(FrozenModel):
+    host: str = "0.0.0.0"
+    port: int = Field(default=80, ge=1, le=65535)
+
+
 class Settings(FrozenModel):
     location: Location
     balance: Balance
@@ -146,6 +151,7 @@ class Settings(FrozenModel):
     weather: Weather
     gpio: Gpio
     runtime: Runtime
+    web: Web = Field(default_factory=Web)
 
 
 class State(FrozenModel):

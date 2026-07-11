@@ -621,6 +621,29 @@ def test_run_install_shows_service_status(tmp_path, monkeypatch):
     )
 
 
+def test_run_install_shows_dashboard_status(tmp_path, monkeypatch):
+    _patch_pi(monkeypatch, pi=True)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
+    unit = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
+    dashboard = Path("/etc/systemd/system/rain-bypass-dashboard.service")
+    original_is_file = Path.is_file
+
+    def is_file(self: Path) -> bool:
+        if self in {unit, dashboard}:
+            return True
+        return original_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    monkeypatch.setattr("rain_bypass.install_flow.system_hostname", lambda: "sprinkler")
+    prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False, False])
+    run_install(
+        tmp_path,
+        prompter=prompter,
+        skip_systemd=True,
+        skip_once=True,
+    )
+
+
 def test_run_install_invokes_systemd(tmp_path, monkeypatch):
     _patch_pi(monkeypatch, pi=True)
     monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
@@ -628,6 +651,10 @@ def test_run_install_invokes_systemd(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "rain_bypass.install_flow.install_systemd_unit",
         lambda *args, **kwargs: invoked.append(True),
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_flow.install_dashboard_unit",
+        lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
         "rain_bypass.install_flow.install_autoupdate",
@@ -644,6 +671,10 @@ def test_run_install_invokes_autoupdate_on_pi(tmp_path, monkeypatch):
     invoked: list[bool] = []
     monkeypatch.setattr(
         "rain_bypass.install_flow.install_systemd_unit",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_flow.install_dashboard_unit",
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
@@ -803,6 +834,10 @@ def test_run_install_skips_autoupdate_off_pi(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "rain_bypass.install_flow.install_systemd_unit",
         lambda *args, **kwargs: systemd_calls.append(True),
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_flow.install_dashboard_unit",
+        lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
         "rain_bypass.install_flow.install_autoupdate",

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Web dashboard** — `rain-bypass serve` exposes a read-only mobile HTML page on `[web]` host/port (default port 80). Routes: `/` (cached status) and `/live` (live weather). Pi installer optionally installs `rain-bypass-dashboard.service` with `CAP_NET_BIND_SERVICE` and ensures Avahi mDNS so phones can open `http://<hostname>.local/`.
+
 ### Changed
 
 - **Watering history** — `watering_history.jsonl` is the single source of truth for irrigation credited this month; each control cycle appends a record, entries older than one year are pruned on append; view with `rain-bypass history`. Legacy `irrigation_inches_mtd` in `state.json` migrates into history on first run.

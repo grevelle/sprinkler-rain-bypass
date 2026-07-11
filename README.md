@@ -127,6 +127,30 @@ source .venv/bin/activate
 rain-bypass status --cached
 ```
 
+### Web dashboard (phone)
+
+Read-only HTML dashboard for home Wi‑Fi. The installer can enable **`rain-bypass-dashboard`** on port **80** with mDNS so you can open **`http://sprinkler.local/`** (use your Pi hostname — check with `hostnamectl`).
+
+```bash
+cd ~/sprinkler-rain-bypass
+
+# Manual run (dev — on Windows use --port 8080; port 80 needs admin):
+.venv/bin/python -m rain_bypass serve
+rain-bypass serve --port 8080
+
+# After install.sh on the Pi:
+sudo systemctl status rain-bypass-dashboard
+sudo systemctl status avahi-daemon
+
+# Verify mDNS from the Pi:
+avahi-resolve-host-name sprinkler.local
+```
+
+- **`/`** — cached status (auto-refreshes every 60s)
+- **`/live`** — fetches live weather (use sparingly)
+
+If mDNS does not work on your phone (some Android browsers), use **`http://<pi-ip>/`** instead. The page is visible to anyone on your LAN — do not port-forward without adding auth.
+
 ### Watering history
 
 Each control cycle (`--once` or the daily check) appends one line to **`watering_history.jsonl`** next to `state.json` (or `runtime.history_path` if set). **This file is the single source of truth** for how much irrigation has been credited this month — balance decisions sum `inches_credited` from the log; `state.json` holds only relay and weather snapshot fields. Records older than one year are dropped automatically on each append. This logs the bypass **decision** and inches credited — not confirmation that Rain Bird actually ran.
@@ -323,6 +347,7 @@ After editing `settings.toml`, run `status` or `--once` to confirm the new logic
 | `weather`  | `api_key` (Visual Crossing Timeline API)                                                                                                                                                                                              |
 | `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`                                                                                                                                                                      |
 | `runtime`  | `state_path`, optional `history_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`                                                                                                                                                                     |
+| `web`      | `host` (default `0.0.0.0`), `port` (default `80`) — read-only dashboard (`rain-bypass serve`)                                                                                                                                                                |
 
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
@@ -378,9 +403,9 @@ Layered Python package under `src/rain_bypass/`:
 
 | Layer | Modules |
 | ----- | ------- |
-| **Core** | `paths`, `config`, `models`, `balance`, `windows`, `weather`, `logic`, `controller`, `gpio`, `status`, `history`, `cli` |
+| **Core** | `paths`, `config`, `models`, `balance`, `windows`, `weather`, `logic`, `controller`, `gpio`, `status`, `history`, `web`, `cli` |
 | **Installer** | `install_cli` (Typer app), `install_flow`, `install_prompts`, `prompting` |
-| **Deploy** | `deploy` (systemd unit + auto-update timer) |
+| **Deploy** | `deploy` (systemd units, mDNS/Avahi setup, auto-update timer) |
 | **Support** | `platform`, `logging_setup`, `exceptions` |
 
 - **`weather`** — Visual Crossing Timeline API via httpx; responses validated as Pydantic `TimelineDay` / `TimelineResponse` before balance math.

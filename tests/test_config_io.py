@@ -131,6 +131,12 @@ def test_write_settings_history_path(tmp_path: Path):
     assert loaded.runtime.history_path == custom
 
 
+def test_web_defaults():
+    settings = load_example_settings(weather={"api_key": "web-test"})
+    assert settings.web.host == "0.0.0.0"
+    assert settings.web.port == 80
+
+
 def test_load_example_settings_missing_file(tmp_path: Path, monkeypatch):
     missing = tmp_path / "missing.example.toml"
     monkeypatch.setattr("rain_bypass.config.EXAMPLE_SETTINGS_PATH", missing)

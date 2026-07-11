@@ -11,6 +11,7 @@ from rain_bypass.controller import run
 from rain_bypass.history import print_history
 from rain_bypass.logging_setup import configure_logging
 from rain_bypass.status import print_status
+from rain_bypass.web import run_server
 
 app = typer.Typer(
     add_completion=False,
@@ -80,3 +81,36 @@ def history(
     except ConfigError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
+
+
+@app.command("serve")
+def serve(
+    config: Annotated[
+        Path,
+        typer.Option("-c", "--config", help="Path to settings.toml"),
+    ] = Path("settings.toml"),
+    host: Annotated[
+        str | None,
+        typer.Option("--host", help="Bind address (default from settings [web].host)"),
+    ] = None,
+    port: Annotated[
+        int | None,
+        typer.Option("--port", help="Bind port (default from settings [web].port)", min=1),
+    ] = None,
+) -> None:
+    """Run the read-only mobile web dashboard (GET / and GET /live)."""
+    try:
+        settings = load_settings(config)
+    except ConfigError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    configure_logging(settings.runtime.log_level)
+    bind_host = host if host is not None else settings.web.host
+    bind_port = port if port is not None else settings.web.port
+    try:
+        run_server(config, host=bind_host, port=bind_port)
+    except OSError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    except KeyboardInterrupt:
+        raise typer.Exit(0) from None

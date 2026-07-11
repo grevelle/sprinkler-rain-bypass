@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
+import time
 from pathlib import Path
 
 import typer
@@ -11,6 +13,7 @@ from rain_bypass.paths import repo_root
 from rain_bypass.prompting import Prompter, RunCommand, detect_service_user
 
 SERVICE_NAME = "rain-bypass"
+DASHBOARD_SERVICE_NAME = "rain-bypass-dashboard"
 AUTO_UPDATE_SERVICE_NAME = "rain-bypass-auto-update"
 DEPLOY_DIR = repo_root() / "deploy"
 
@@ -49,6 +52,117 @@ def render_autoupdate_service(root: Path, service_user: str) -> str:
 
 def render_autoupdate_timer() -> str:
     return _render_template("rain-bypass-auto-update.timer.in", {})
+
+
+def render_dashboard_unit(root: Path, python: Path, settings: Path, service_user: str) -> str:
+    return _render_template(
+        "rain-bypass-dashboard.service.in",
+        {
+            "@ROOT@": root.as_posix(),
+            "@PYTHON@": python.as_posix(),
+            "@SETTINGS@": settings.as_posix(),
+            "@USER@": service_user,
+        },
+    )
+
+
+def system_hostname() -> str:
+    return socket.gethostname().lower()
+
+
+def verify_mdns(hostname: str, *, retries: int = 3, delay_seconds: float = 0.5) -> bool:
+    """Return True if hostname.local resolves on this machine."""
+    fqdn = f"{hostname.lower()}.local"
+    resolver = shutil.which("avahi-resolve-host-name")
+    if resolver is not None:
+        result = subprocess.run(
+            [resolver, fqdn],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return True
+    for attempt in range(retries):
+        try:
+            socket.getaddrinfo(fqdn, 80, type=socket.SOCK_STREAM)
+            return True
+        except OSError:
+            if attempt + 1 >= retries:
+                return False
+            time.sleep(delay_seconds)
+    return False
+
+
+def ensure_mdns(*, run_command: RunCommand | None = None) -> bool:
+    """Install and enable Avahi so hostname.local resolves. Returns verification result."""
+    if os.name != "posix":
+        return False
+    runner: RunCommand = run_command or subprocess.run
+    if shutil.which("apt-get") is None:
+        typer.secho(
+            "warning: apt-get not found; skipping mDNS setup.",
+            fg=typer.colors.YELLOW,
+        )
+        return False
+
+    hostname = system_hostname()
+    typer.echo("==> Ensuring mDNS (Avahi) for LAN dashboard access")
+    runner(
+        ["sudo", "apt-get", "install", "-y", "-qq", "avahi-daemon", "avahi-utils"],
+        check=True,
+    )
+    if shutil.which("systemctl") is not None:
+        runner(["sudo", "systemctl", "enable", "--now", "avahi-daemon"], check=True)
+
+    if verify_mdns(hostname):
+        typer.echo(f"==> mDNS OK — open http://{hostname}.local/ on your phone")
+        return True
+
+    typer.secho(
+        f"warning: could not verify mDNS for {hostname}.local. "
+        "Check: systemctl status avahi-daemon; same Wi-Fi/VLAN; or use http://<pi-ip>/",
+        fg=typer.colors.YELLOW,
+    )
+    return False
+
+
+def install_dashboard_unit(
+    root: Path,
+    python: Path,
+    settings: Path,
+    *,
+    prompter: Prompter,
+    run_command: RunCommand | None = None,
+) -> None:
+    runner: RunCommand = run_command or subprocess.run
+    if shutil.which("systemctl") is None:
+        typer.secho(
+            "warning: systemctl not found; skipping dashboard service install.",
+            fg=typer.colors.YELLOW,
+        )
+        return
+    hostname = system_hostname()
+    if not prompter.confirm(
+        f"Install dashboard + mDNS (phone status at http://{hostname}.local/)?",
+        default=True,
+    ):
+        return
+
+    service_user = detect_service_user(run_command=runner, prompter=prompter)
+
+    unit_path = Path(f"/etc/systemd/system/{DASHBOARD_SERVICE_NAME}.service")
+    typer.echo(f"==> Installing {unit_path} (requires sudo)")
+    runner(
+        ["sudo", "tee", str(unit_path)],
+        input=render_dashboard_unit(root, python, settings, service_user).encode(),
+        check=True,
+    )
+    runner(["sudo", "systemctl", "daemon-reload"], check=True)
+    runner(["sudo", "systemctl", "enable", DASHBOARD_SERVICE_NAME], check=True)
+    runner(["sudo", "systemctl", "restart", DASHBOARD_SERVICE_NAME], check=True)
+    typer.echo(f"==> Dashboard enabled. Status: sudo systemctl status {DASHBOARD_SERVICE_NAME}")
+    ensure_mdns(run_command=runner)
 
 
 def install_unattended_upgrades(*, run_command: RunCommand | None = None) -> None:
