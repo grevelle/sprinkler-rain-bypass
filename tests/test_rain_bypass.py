@@ -718,6 +718,54 @@ def test_run_loop_uses_scheduled_check(settings, monkeypatch):
         )
 
 
+def test_run_loop_waits_before_first_tick(settings, monkeypatch):
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    tick_calls = 0
+
+    def counting_tick(*args, **kwargs):
+        nonlocal tick_calls
+        tick_calls += 1
+        return tick(*args, **kwargs)
+
+    monkeypatch.setattr("rain_bypass.controller.tick", counting_tick)
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0))
+
+    def _interrupt_sleep(_seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run(settings, pin_factory=_noop_pins, sleep=_interrupt_sleep)
+
+    assert tick_calls == 0
+
+
+def test_run_loop_ticks_after_scheduled_sleep(settings, monkeypatch):
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    tick_calls = 0
+
+    def counting_tick(*args, **kwargs):
+        nonlocal tick_calls
+        tick_calls += 1
+        return tick(*args, **kwargs)
+
+    monkeypatch.setattr("rain_bypass.controller.tick", counting_tick)
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0))
+
+    sleeps = 0
+
+    def sleep_once(_seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps > 1:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run(settings, pin_factory=_noop_pins, seconds_until_check=lambda _s: 1.0, sleep=sleep_once)
+
+    assert sleeps == 2
+    assert tick_calls == 1
+
+
 def test_mock_pins():
     MockPins().apply(True)
     MockPins().apply(False)

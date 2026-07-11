@@ -79,5 +79,5 @@ def run(
             return
 
         while True:
-            state = tick(settings, state, driver.apply)
             sleep(wait(settings))
+            state = tick(settings, state, driver.apply)
