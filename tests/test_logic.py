@@ -5,7 +5,7 @@ from datetime import date
 from conftest import patch_local_today, weather_snapshot
 
 from rain_bypass.config import State
-from rain_bypass.logic import evaluate_weather, preview
+from rain_bypass.logic import evaluate_weather, preview, safety_allows_watering
 from rain_bypass.models import Preview
 
 
@@ -138,3 +138,16 @@ def test_preview_would_water_from_evaluation() -> None:
         cached_verdict=None,
     )
     assert result.would_water is True
+
+
+def test_safety_allows_watering(settings) -> None:
+    assert safety_allows_watering(weather_snapshot(0.0, 0.0, 0.24), settings) is True
+    assert safety_allows_watering(weather_snapshot(0.0, 0.0, 0.25), settings) is False
+    assert (
+        safety_allows_watering(weather_snapshot(0.0, 0.0, 0.0, freeze_block=True), settings)
+        is False
+    )
+    no_event = settings.model_copy(
+        update={"watering": settings.watering.model_copy(update={"event_inches": 0})}
+    )
+    assert safety_allows_watering(weather_snapshot(0.0, 0.0, 0.5), no_event) is True

@@ -11,10 +11,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from conftest import (
+    build_dashboard,
     evaluation,
     mock_gather_status,
     patch_local_today,
     status_snapshot,
+    watering_record,
 )
 from conftest import (
     preview as make_preview,
@@ -25,15 +27,13 @@ from rain_bypass.cli import app
 from rain_bypass.config import State, load_settings
 from rain_bypass.history import WateringRecord, append_record, history_path
 from rain_bypass.models import Preview
-from rain_bypass.status import format_inches, gather_status
+from rain_bypass.status import gather_status
 from rain_bypass.web import (
     DashboardHistoryRow,
     DashboardHTTPServer,
     _collapse_history_rows,
     _decision_short,
     _hero_subtitle,
-    _history_details,
-    _history_verdict,
     _make_handler,
     _relay_short,
     _updated_meta,
@@ -42,11 +42,6 @@ from rain_bypass.web import (
     render_dashboard_html,
     run_server,
 )
-
-
-def test_format_inches_none() -> None:
-    assert format_inches(None) == "n/a"
-    assert format_inches(0.5) == "0.50 in"
 
 
 def test_verdict_badge_allow_block_unknown() -> None:
@@ -105,47 +100,8 @@ def test_build_dashboard_view_uses_daily_verdict_not_projection(
     assert view.hero_subtitle == "Watering allowed until next check"
 
 
-def test_history_details_variants() -> None:
-    base = {
-        "checked_at": 1.0,
-        "local_date": "2024-07-15",
-        "allowed": False,
-        "inches_credited": 0.0,
-        "irrigation_mtd": 0.3,
-    }
-    assert "Sewer lockout" in _history_details(WateringRecord(**{**base, "sewer_lockout": True}))  # type: ignore[arg-type]
-    assert "weather check failed" in _history_details(
-        WateringRecord(**{**base, "weather_error": "timeout"})  # type: ignore[arg-type]
-    )
-    assert "credited" in _history_details(WateringRecord(**{**base, "allowed": True}))  # type: ignore[arg-type]
-    assert "still needed" in _history_details(
-        WateringRecord(**{**base, "deficit": 0.2})  # type: ignore[arg-type]
-    )
-    assert "balance satisfied" in _history_details(WateringRecord(**base))  # type: ignore[arg-type]
-
-
-def test_history_verdict_variants() -> None:
-    base = {
-        "checked_at": 1.0,
-        "local_date": "2024-07-15",
-        "allowed": True,
-        "inches_credited": 0.3,
-        "irrigation_mtd": 0.3,
-    }
-    assert _history_verdict(WateringRecord(**base)) == ("ALLOW", "allow")  # type: ignore[arg-type]
-    blocked = {**base, "allowed": False}
-    assert _history_verdict(WateringRecord(**blocked)) == ("BLOCK", "block")  # type: ignore[arg-type]
-    sewer = {**base, "allowed": False, "sewer_lockout": True}
-    assert _history_verdict(WateringRecord(**sewer)) == ("BLOCK (sewer)", "block")  # type: ignore[arg-type]
-    weather = {**base, "allowed": False, "weather_error": "timeout"}
-    assert _history_verdict(WateringRecord(**weather)) == ("BLOCK (weather)", "block")  # type: ignore[arg-type]
-
-
 def test_build_dashboard_view_cached(settings, settings_path: Path, monkeypatch) -> None:
-    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
-    snapshot = status_snapshot(settings)
-    mock_gather_status(monkeypatch, snapshot)
-    view = build_dashboard_view(settings_path, fetch_live=False)
+    view = build_dashboard(settings_path, monkeypatch, fetch_live=False)
     assert view.verdict_label == "ALLOW"
     assert view.live_mode is False
     assert view.refresh_seconds == 60
@@ -156,7 +112,6 @@ def test_build_dashboard_view_cached(settings, settings_path: Path, monkeypatch)
 
 
 def test_build_dashboard_view_balance_surplus(settings, settings_path: Path, monkeypatch) -> None:
-    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
     preview = make_preview(
         evaluation=evaluation(
             deficit=-0.1,
@@ -165,29 +120,21 @@ def test_build_dashboard_view_balance_surplus(settings, settings_path: Path, mon
         ),
         irrigation_mtd=0.3,
     )
-    snapshot = status_snapshot(settings, preview_obj=preview)
-    mock_gather_status(monkeypatch, snapshot)
-    view = build_dashboard_view(settings_path)
+    view = build_dashboard(settings_path, monkeypatch, preview_obj=preview)
     assert view.balance is not None
     assert view.balance.deficit_class == "surplus"
 
 
 def test_build_dashboard_view_balance_even(settings, settings_path: Path, monkeypatch) -> None:
-    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
     preview = make_preview(evaluation=evaluation(deficit=0.0))
-    snapshot = status_snapshot(settings, preview_obj=preview)
-    mock_gather_status(monkeypatch, snapshot)
-    view = build_dashboard_view(settings_path)
+    view = build_dashboard(settings_path, monkeypatch, preview_obj=preview)
     assert view.balance is not None
     assert view.balance.deficit_class == "even"
 
 
 def test_build_dashboard_view_live_and_sewer(settings, settings_path: Path, monkeypatch) -> None:
-    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
     preview = make_preview(sewer_lockout=True, evaluation=evaluation(watering_required=False))
-    snapshot = status_snapshot(settings, preview_obj=preview, fetch_live=True)
-    mock_gather_status(monkeypatch, snapshot)
-    view = build_dashboard_view(settings_path, fetch_live=True)
+    view = build_dashboard(settings_path, monkeypatch, preview_obj=preview, fetch_live=True)
     assert view.verdict_label == "BLOCK"
     assert view.live_mode is True
     assert view.refresh_seconds is None
@@ -196,24 +143,19 @@ def test_build_dashboard_view_live_and_sewer(settings, settings_path: Path, monk
 
 
 def test_build_dashboard_view_with_history(settings, settings_path: Path, monkeypatch) -> None:
-    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
-    snapshot = status_snapshot(settings)
-    mock_gather_status(monkeypatch, snapshot)
     path = history_path(settings)
     append_record(
         path,
-        WateringRecord(
+        watering_record(
             checked_at=1_721_000_000.0,
-            local_date="2024-07-15",
             allowed=True,
             inches_credited=0.3,
-            irrigation_mtd=0.3,
             rain_mtd=0.1,
             forecast_inches=0.05,
             deficit=0.4,
         ),
     )
-    view = build_dashboard_view(settings_path, history_limit=5)
+    view = build_dashboard(settings_path, monkeypatch, history_limit=5)
     assert len(view.history_rows) == 1
     assert view.history_rows[0].verdict == "ALLOW"
 
@@ -221,7 +163,6 @@ def test_build_dashboard_view_with_history(settings, settings_path: Path, monkey
 def test_build_dashboard_view_error_and_noevaluation(
     settings, settings_path: Path, monkeypatch
 ) -> None:
-    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
     state = State(last_error="<script>alert(1)</script>", watering_required=None)
     preview = Preview(
         irrigation_mtd=0.0,
@@ -233,9 +174,7 @@ def test_build_dashboard_view_error_and_noevaluation(
         from_saved_weather=False,
         safety_known=False,
     )
-    snapshot = status_snapshot(settings, preview_obj=preview, state=state)
-    mock_gather_status(monkeypatch, snapshot)
-    view = build_dashboard_view(settings_path)
+    view = build_dashboard(settings_path, monkeypatch, preview_obj=preview, state=state)
     html_text = render_dashboard_html(view)
     assert view.last_error == "<script>alert(1)</script>"
     assert "<script>alert(1)</script>" not in html_text

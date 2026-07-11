@@ -6,13 +6,14 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from conftest import evaluation, patch_local_today, weather_snapshot
+from conftest import evaluation, patch_local_today, watering_record, weather_snapshot
 from typer.testing import CliRunner
 
 from rain_bypass.cli import app
 from rain_bypass.config import State
 from rain_bypass.history import (
     WateringRecord,
+    _format_allowed,
     _write_records,
     append_record,
     append_watering_history,
@@ -22,6 +23,8 @@ from rain_bypass.history import (
     load_records,
     migrate_legacy_irrigation,
     print_history,
+    watering_record_details,
+    watering_verdict,
 )
 from rain_bypass.logic import decide
 from rain_bypass.models import Decision
@@ -417,44 +420,44 @@ def test_cli_history_config_error(tmp_path):
     assert result.exit_code == 1
 
 
-def test_format_allowed_branches():
-    from rain_bypass.history import _format_allowed
+@pytest.mark.parametrize(
+    ("overrides", "expected_label", "expected_kind"),
+    [
+        ({"allowed": True, "inches_credited": 0.3, "irrigation_mtd": 0.3}, "ALLOW", "allow"),
+        ({}, "BLOCK", "block"),
+        ({"sewer_lockout": True}, "BLOCK (sewer)", "block"),
+        ({"weather_error": "timeout"}, "BLOCK (weather)", "block"),
+    ],
+)
+def test_watering_verdict(overrides, expected_label, expected_kind) -> None:
+    record = watering_record(**overrides)
+    assert watering_verdict(record) == (expected_label, expected_kind)
 
-    assert "ALLOW" in _format_allowed(
-        WateringRecord(
-            checked_at=1.0,
-            local_date="2024-07-01",
-            allowed=True,
-            inches_credited=0.3,
-            irrigation_mtd=0.3,
-        )
-    )
-    assert "sewer" in _format_allowed(
-        WateringRecord(
-            checked_at=1.0,
-            local_date="2024-07-01",
-            allowed=False,
-            inches_credited=0.0,
-            irrigation_mtd=0.0,
-            sewer_lockout=True,
-        )
-    )
-    assert "weather" in _format_allowed(
-        WateringRecord(
-            checked_at=1.0,
-            local_date="2024-07-01",
-            allowed=False,
-            inches_credited=0.0,
-            irrigation_mtd=0.0,
-            weather_error="x",
-        )
-    )
-    assert "BLOCK" in _format_allowed(
-        WateringRecord(
-            checked_at=1.0,
-            local_date="2024-07-01",
-            allowed=False,
-            inches_credited=0.0,
-            irrigation_mtd=0.0,
-        )
-    )
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_substring"),
+    [
+        ({"sewer_lockout": True}, "Sewer lockout"),
+        ({"weather_error": "timeout"}, "weather check failed"),
+        ({"allowed": True, "inches_credited": 0.3, "irrigation_mtd": 0.3}, "credited"),
+        ({"deficit": 0.2}, "still needed"),
+        ({}, "balance satisfied"),
+    ],
+)
+def test_watering_record_details(overrides, expected_substring) -> None:
+    record = watering_record(**overrides)
+    assert expected_substring in watering_record_details(record)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_in_output"),
+    [
+        ({"allowed": True, "inches_credited": 0.3, "irrigation_mtd": 0.3}, "ALLOW"),
+        ({"sewer_lockout": True}, "sewer"),
+        ({"weather_error": "x"}, "weather"),
+        ({}, "BLOCK"),
+    ],
+)
+def test_format_allowed_styled(overrides, expected_in_output) -> None:
+    record = watering_record(**overrides)
+    assert expected_in_output in _format_allowed(record)

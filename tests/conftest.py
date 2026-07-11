@@ -7,9 +7,11 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from rain_bypass.config import Gpio, State, load_example_settings, load_settings, write_settings
+from rain_bypass.history import WateringRecord
 from rain_bypass.models import Evaluation, Preview, WeatherSnapshot
 from rain_bypass.status import StatusSnapshot
 from rain_bypass.weather import TimelineDay
+from rain_bypass.web import build_dashboard_view
 
 TEST_SETTINGS_OVERRIDES = {
     "weather": {"api_key": "test-key"},
@@ -97,6 +99,44 @@ def mock_gather_status(monkeypatch: pytest.MonkeyPatch, snapshot: StatusSnapshot
         "rain_bypass.web.gather_status",
         lambda *_args, **_kwargs: snapshot,
     )
+
+
+def watering_record(**overrides: object) -> WateringRecord:
+    defaults: dict[str, object] = {
+        "checked_at": 1.0,
+        "local_date": "2024-07-15",
+        "allowed": False,
+        "inches_credited": 0.0,
+        "irrigation_mtd": 0.3,
+    }
+    defaults.update(overrides)
+    return WateringRecord(**defaults)  # type: ignore[arg-type]
+
+
+def build_dashboard(
+    settings_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    preview_obj: Preview | None = None,
+    state: State | None = None,
+    fetch_live: bool = False,
+    history_limit: int | None = None,
+    when: datetime | None = None,
+):
+    settings = load_settings(settings_path)
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    snapshot = status_snapshot(
+        settings,
+        preview_obj=preview_obj,
+        state=state,
+        fetch_live=fetch_live,
+        when=when,
+    )
+    mock_gather_status(monkeypatch, snapshot)
+    kwargs: dict[str, object] = {"fetch_live": fetch_live}
+    if history_limit is not None:
+        kwargs["history_limit"] = history_limit
+    return build_dashboard_view(settings_path, **kwargs)  # type: ignore[arg-type]
 
 
 @pytest.fixture

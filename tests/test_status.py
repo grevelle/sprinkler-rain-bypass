@@ -14,6 +14,7 @@ from rain_bypass.config import ConfigError, State
 from rain_bypass.status import (
     format_deficit_formula,
     format_duration,
+    format_inches,
     format_safety_gate,
     format_status,
     format_timestamp,
@@ -26,16 +27,21 @@ from rain_bypass.status import (
 )
 
 
-def test_format_duration_minutes() -> None:
-    assert format_duration(30 * 60) == "30m"
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (30 * 60, "30m"),
+        (90 * 60, "1h 30m"),
+        (25 * 3600, "1d 1h"),
+    ],
+)
+def test_format_duration(seconds: float, expected: str) -> None:
+    assert format_duration(seconds) == expected
 
 
-def test_format_duration_hours() -> None:
-    assert format_duration(90 * 60) == "1h 30m"
-
-
-def test_format_duration_days() -> None:
-    assert format_duration(25 * 3600) == "1d 1h"
+def test_format_inches() -> None:
+    assert format_inches(None) == "n/a"
+    assert format_inches(0.5) == "0.50 in"
 
 
 def test_format_timestamp_never() -> None:
@@ -92,15 +98,24 @@ def test_format_safety_gate_unknown() -> None:
     )
 
 
-def test_format_would_decide_now_block() -> None:
-    text = format_would_decide_now(False, safety_known=True, balance_ok=False)
-    assert text == "BLOCK watering (skip today's cycle)"
-
-
-def test_format_would_decide_now_balance_only() -> None:
-    text = format_would_decide_now(None, safety_known=False, balance_ok=True)
-    assert "ALLOW by balance" in text
-    assert "--cached" in text
+@pytest.mark.parametrize(
+    ("watering_required", "safety_known", "balance_ok", "expected_parts"),
+    [
+        (False, True, False, ("BLOCK watering (skip today's cycle)",)),
+        (None, False, True, ("ALLOW by balance", "--cached")),
+    ],
+)
+def test_format_would_decide_now(
+    watering_required: bool | None,
+    safety_known: bool,
+    balance_ok: bool,
+    expected_parts: tuple[str, ...],
+) -> None:
+    text = format_would_decide_now(
+        watering_required, safety_known=safety_known, balance_ok=balance_ok
+    )
+    for part in expected_parts:
+        assert part in text
 
 
 def test_relay_mismatch_note() -> None:
