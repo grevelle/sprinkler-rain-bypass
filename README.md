@@ -290,15 +290,21 @@ ruff check .
 ruff check --fix .
 ruff format .
 ruff format --check .
-shellcheck install.sh configure.sh scripts/auto-update.sh scripts/lib/common.sh
+shellcheck install.sh configure.sh scripts/auto-update.sh scripts/lib/common.sh scripts/check_shell_functions.sh
 python scripts/check_lf.py
+python scripts/check_dashboard_css.py
+python scripts/check_test_fixtures.py
+python scripts/check_shell_functions.py
 pyright
 python -m vulture src/rain_bypass vulture_whitelist.py --min-confidence 80
+python -m vulture tests vulture_tests_whitelist.py --min-confidence 80
 pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100
 pre-commit run --all-files
 ```
 
-Ruff enables `E`, `F`, `I`, `UP`, `B`, `SIM`, and `RUF`. Dependencies and GitHub Actions refs stay **unpinned** (latest on each install/CI run). CI also runs **vulture** (dead-code detection) and **ShellCheck** on `install.sh`, `configure.sh`, `scripts/auto-update.sh`, and `scripts/lib/common.sh`.
+Ruff enables `E`, `F`, `I`, `UP`, `B`, `SIM`, and `RUF`. Dependencies and GitHub Actions refs stay **unpinned** (latest on each install/CI run). CI also runs **vulture** (dead-code detection on `src/` and `tests/`), **ShellCheck** on install/auto-update scripts, and orphan checks for dashboard CSS, conftest fixtures, and shell functions.
+
+**Dead code policy:** prefer deleting unused symbols over whitelisting. [`vulture_whitelist.py`](vulture_whitelist.py) and [`vulture_tests_whitelist.py`](vulture_tests_whitelist.py) document framework false positives only (Typer commands, Pydantic hooks, HTTP handlers, pytest autouse fixtures). Maintenance scripts: `scripts/check_dashboard_css.py`, `scripts/check_test_fixtures.py`, `scripts/check_shell_functions.py`.
 
 Shared test helpers live in `tests/conftest.py` (`weather_snapshot`, `timeline_day`, `patch_local_today`, `watering_record`, `build_dashboard`). Tests are split by domain — see [Code layout](#code-layout).
 
@@ -607,11 +613,16 @@ Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from b
 | `tests/test_history.py` | Watering log, verdict/details helpers |
 | `tests/test_status.py` | Text status formatting |
 | `tests/test_web.py` | HTML dashboard (view + HTTP server) |
+| `tests/test_check_scripts.py` | Maintenance script smoke tests |
 | `tests/test_balance.py`, `test_config_io.py`, … | Focused unit tests |
 | `tests/conftest.py` | Shared fixtures and factories |
 | `scripts/ci.sh` / `ci.ps1` | Local CI gate (mirrors GitHub Actions) |
 | `scripts/lib/common.sh` | Shared shell helpers for install and auto-update |
-| `vulture_whitelist.py` | Intentional “dead code” entries for vulture CI |
+| `vulture_whitelist.py` | Intentional “dead code” entries for vulture CI (`src/`) |
+| `vulture_tests_whitelist.py` | Vulture false positives for pytest fixtures and markers |
+| `scripts/check_dashboard_css.py` | Fail CI on unused dashboard CSS classes/variables |
+| `scripts/check_test_fixtures.py` | Fail CI on unreferenced conftest fixtures |
+| `scripts/check_shell_functions.py` | Fail CI on unused shell functions |
 | `deploy/*.service.in` | systemd unit templates |
 
 Typer powers `rain-bypass` and `rain-bypass-install`. The package ships **`py.typed`** (PEP 561) for downstream type checkers. Code targets **Python 3.12+** syntax (PEP 695 aliases, `match`/`case`, `typing.override`); CI and the Pi runtime use the latest **3.x** (3.13 on current Pi OS).

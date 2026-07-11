@@ -24,6 +24,18 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      - id: vulture-src
+        name: vulture src
+        entry: python -m vulture src/rain_bypass vulture_whitelist.py --min-confidence 80
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+      - id: vulture-tests
+        name: vulture tests
+        entry: python -m vulture tests vulture_tests_whitelist.py --min-confidence 80
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
       - id: pyright
         name: pyright
         entry: pyright

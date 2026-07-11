@@ -399,7 +399,7 @@ def test_print_history_shows_records(settings, tmp_path, capsys):
 def test_cli_history_command(settings_path, monkeypatch):
     monkeypatch.setattr(
         "rain_bypass.history.load_records",
-        lambda _path, limit=30: [
+        lambda _path, **_: [
             WateringRecord(
                 checked_at=1.0,
                 local_date="2024-07-01",

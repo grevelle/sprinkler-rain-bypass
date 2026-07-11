@@ -43,7 +43,7 @@ def _patch_pi(monkeypatch: pytest.MonkeyPatch, *, pi: bool) -> None:
 
 @pytest.fixture(autouse=True)
 def _stub_resolve_location(monkeypatch):
-    def fake_resolve(zip_code: str, api_key: str, *, timeout: int = 45) -> Location:
+    def fake_resolve(zip_code: str, api_key: str, *, _timeout: int = 45) -> Location:
         return Location(
             zip_code=zip_code,
             latitude=43.106,

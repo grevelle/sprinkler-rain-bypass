@@ -140,11 +140,6 @@ def build_dashboard(
 
 
 @pytest.fixture
-def frozen_july_clock(settings) -> datetime:
-    return datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo(settings.location.timezone))
-
-
-@pytest.fixture
 def settings_path(tmp_path: Path) -> Path:
     path = tmp_path / "settings.toml"
     overrides = dict(TEST_SETTINGS_OVERRIDES)
@@ -169,17 +164,13 @@ def fake_output_device(monkeypatch):
         def __init__(self, pin: int, initial_value: bool = False) -> None:
             self.pin = pin
             self.value = initial_value
-            self.on_calls = 0
-            self.off_calls = 0
             self.closed = False
             devices.append(self)
 
         def on(self) -> None:
-            self.on_calls += 1
             self.value = True
 
         def off(self) -> None:
-            self.off_calls += 1
             self.value = False
 
         def close(self) -> None:
