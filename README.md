@@ -42,7 +42,7 @@ cp settings.example.toml settings.toml
 | GPIO library | **GPIO Zero** (`lgpio` backend on Bookworm+) — works on Zero W through Pi 5 |
 | Relay module | **3.3 V** logic (see Hardware below) |
 | systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
-| Maintenance | Optional **daily auto-update** at 12:00 — `git pull`, pip, service restart (OS via `unattended-upgrades`; see [Automatic updates](#automatic-daily-updates)) |
+| Maintenance | Optional **daily auto-update** at 12:00 — `apt dist-upgrade`, `git pull`, pip, service restart (plus morning `unattended-upgrades`; see [Automatic updates](#automatic-daily-updates)) |
 
 On boot the relay **blocks watering** until the first check completes, then applies the decision from the daily check.
 
@@ -173,7 +173,7 @@ sudo systemctl restart rain-bypass
 | Timer | When | What |
 | ----- | ---- | ---- |
 | `apt-daily-upgrade.timer` | ~06:00–07:00 (system default) | **OS packages** via `unattended-upgrades` (Debian/Raspbian standard) |
-| `rain-bypass-auto-update.timer` | **12:00** | **`git pull`**, **`pip install`**, restart `rain-bypass`; **reboot** if kernel/glibc update pending |
+| `rain-bypass-auto-update.timer` | **12:00** | **`apt update` + `apt dist-upgrade`**, **`git pull`**, **`pip install`**, restart `rain-bypass`; **reboot** if kernel/glibc update pending |
 
 `setup-autoupdate` installs `unattended-upgrades`, writes `/etc/apt/apt.conf.d/20auto-upgrades` and `51unattended-upgrades-rain-bypass`, and enables both timer sets.
 
@@ -193,16 +193,18 @@ sudo journalctl -u rain-bypass-auto-update.service --since today
 sudo journalctl -u apt-daily-upgrade.service --since today
 ```
 
-Run app update once manually:
+Run the full daily update once manually (OS dist-upgrade + app):
 
 ```bash
 cd ~/sprinkler-rain-bypass
 sudo ./scripts/auto-update.sh
 ```
 
-Run OS update once manually:
+Run OS update only:
 
 ```bash
+sudo apt update && sudo DEBIAN_FRONTEND=noninteractive apt dist-upgrade -y
+# or the morning unattended-upgrades pass:
 sudo unattended-upgrade -v
 ```
 

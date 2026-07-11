@@ -3,7 +3,7 @@
 Description=Daily auto-update timer for Sprinkler Rain Bypass
 
 [Timer]
-# 12:00 local — midday app update (git pull, pip, service restart).
+# 12:00 local — midday OS dist-upgrade + app update (git pull, pip, service restart).
 OnCalendar=*-*-* 12:00:00
 Persistent=true
 RandomizedDelaySec=15m

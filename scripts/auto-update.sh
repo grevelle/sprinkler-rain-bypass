@@ -25,10 +25,32 @@ restart_service() {
   fi
 }
 
+run_dist_upgrade() {
+  if ! command -v apt-get >/dev/null 2>&1; then
+    log "warning: apt-get not found; skipping OS dist-upgrade"
+    return 0
+  fi
+
+  local apt_prefix=()
+  if [[ "$(id -u)" -ne 0 ]]; then
+    apt_prefix=(sudo)
+  fi
+
+  log "Running apt update and dist-upgrade"
+  if ! "${apt_prefix[@]}" apt-get update -qq; then
+    log "warning: apt-get update failed (continuing with application update)"
+    return 0
+  fi
+  if ! DEBIAN_FRONTEND=noninteractive "${apt_prefix[@]}" apt-get dist-upgrade -y -qq; then
+    log "warning: apt-get dist-upgrade failed (continuing with application update)"
+    return 0
+  fi
+  log "OS dist-upgrade finished"
+}
+
 log "Starting daily auto-update in ${ROOT}"
 
-# OS package upgrades are handled by unattended-upgrades (apt-daily-upgrade.timer).
-# This job updates the rain-bypass application only.
+run_dist_upgrade
 
 if [[ ! -x "${PYTHON}" ]]; then
   log "error: ${PYTHON} not found; run ./install.sh first"
