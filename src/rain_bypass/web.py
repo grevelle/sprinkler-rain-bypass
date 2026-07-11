@@ -12,12 +12,11 @@ from zoneinfo import ZoneInfo
 
 from rain_bypass.config import State, load_settings
 from rain_bypass.history import WateringRecord, history_path, load_records
+from rain_bypass.models import Evaluation
 from rain_bypass.status import (
     format_duration,
     format_updated,
-    format_would_decide_now,
     gather_status,
-    relay_label,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,22 +37,40 @@ class DashboardHistoryRow:
 
 
 @dataclass(frozen=True, slots=True)
+class DashboardBalance:
+    target: str
+    rain: str
+    irrigation: str
+    received: str
+    forecast: str
+    deficit_amount: str
+    deficit_note: str
+    deficit_class: str
+    progress_pct: int
+    cycle_threshold: str
+    headline: str
+
+
+@dataclass(frozen=True, slots=True)
 class DashboardView:
     verdict_label: str
     verdict_class: str
-    relay_text: str
+    relay_short: str
+    hero_subtitle: str
     live_mode: bool
-    location: str
+    mode_label: str
+    location_short: str
+    updated_meta: str
     local_time: str
     next_check: str
-    irrigation_mtd: str
     rain_mtd: str
+    irrigation_mtd: str
     forecast: str
     deficit: str
-    would_decide: str
-    last_updated: str
+    decision_short: str
     last_error: str | None
     sewer_lockout: str | None
+    balance: DashboardBalance | None
     history_rows: tuple[DashboardHistoryRow, ...]
     refresh_seconds: int | None
 
@@ -74,23 +91,128 @@ def _history_verdict(record: WateringRecord) -> tuple[str, str]:
     return "BLOCK", "block"
 
 
+def _history_details(record: WateringRecord) -> str:
+    if record.sewer_lockout:
+        return "Sewer lockout — seasonal hold"
+    if record.weather_error:
+        return "Blocked — weather check failed"
+    if record.allowed:
+        return f"Irrigation credited {record.inches_credited:.2f} in"
+    if record.deficit is not None and record.deficit > 0:
+        return f"{record.deficit:.2f} in still needed for balance"
+    return "Blocked — balance satisfied or safety hold"
+
+
 def _history_row(record: WateringRecord, timezone: str) -> DashboardHistoryRow:
     when = datetime.fromtimestamp(record.checked_at, ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M")
     verdict, verdict_class = _history_verdict(record)
     credit = f"+{record.inches_credited:.2f} in"
-    parts = [f"irr MTD {record.irrigation_mtd:.2f} in"]
-    if record.rain_mtd is not None:
-        parts.append(f"rain {record.rain_mtd:.2f}")
-    if record.forecast_inches is not None:
-        parts.append(f"fc {record.forecast_inches:.2f}")
-    if record.deficit is not None:
-        parts.append(f"deficit {record.deficit:.2f}")
     return DashboardHistoryRow(
         timestamp=when,
         verdict=verdict,
         verdict_class=verdict_class,
         credit=credit,
-        details=", ".join(parts),
+        details=_history_details(record),
+    )
+
+
+def _collapse_history_rows(
+    rows: tuple[DashboardHistoryRow, ...],
+) -> tuple[DashboardHistoryRow, ...]:
+    if not rows:
+        return rows
+    collapsed: list[DashboardHistoryRow] = []
+    for row in rows:
+        if collapsed and collapsed[-1].timestamp == row.timestamp:
+            continue
+        collapsed.append(row)
+    return tuple(collapsed)
+
+
+def _relay_short(allowed: bool | None) -> str:
+    if allowed is None:
+        return "Relay status unknown"
+    if allowed:
+        return "Hardware relay open — panel can run"
+    return "Hardware relay closed — panel blocked"
+
+
+def _decision_short(would_water: bool | None, *, safety_known: bool) -> str:
+    if would_water is True:
+        return "Allow if panel runs today"
+    if would_water is False:
+        return "Skip today's cycle"
+    if not safety_known:
+        return "Safety unverified — refresh live weather"
+    return "Unknown — refresh live weather"
+
+
+def _hero_subtitle(
+    *,
+    would_water: bool | None,
+    sewer_lockout: bool,
+    balance: DashboardBalance | None,
+) -> str:
+    if sewer_lockout:
+        return "Seasonal sewer lockout — watering blocked"
+    if balance is not None:
+        if balance.deficit_class == "need":
+            return balance.deficit_note
+        if balance.deficit_class == "surplus":
+            return "Water budget met — no extra irrigation needed"
+        return "Water budget on target for this period"
+    if would_water is True:
+        return "Balance allows watering if your panel runs"
+    if would_water is False:
+        return "Today's cycle would be skipped"
+    return "Waiting for a completed weather check"
+
+
+def _updated_meta(last_updated: str) -> str:
+    if last_updated == "never":
+        return "Awaiting weather"
+    return f"Updated {last_updated}"
+
+
+def _build_balance(
+    evaluation: Evaluation,
+    irrigation_mtd: float,
+    *,
+    inches_per_cycle: float,
+) -> DashboardBalance:
+    rain = evaluation.rain_mtd
+    forecast = evaluation.forecast_inches
+    target = evaluation.target_to_date
+    deficit = evaluation.deficit
+    received = rain + irrigation_mtd
+    effective = received + forecast
+    progress_pct = min(100, round(100 * effective / target)) if target > 0 else 0
+    if deficit > 0:
+        deficit_class = "need"
+        deficit_note = (
+            f"{deficit:.2f} in gap before balance allows a cycle (need ≥ {inches_per_cycle:.2f} in)"
+        )
+    elif deficit < 0:
+        deficit_class = "surplus"
+        deficit_note = f"{abs(deficit):.2f} in over the monthly target pace"
+    else:
+        deficit_class = "even"
+        deficit_note = "On target — no watering needed for balance"
+    headline = (
+        f"{received:.2f} in received (rain + irrigation) toward {target:.2f} in needed to date"
+    )
+    return DashboardBalance(
+        target=_format_inches(target),
+        rain=_format_inches(rain),
+        irrigation=_format_inches(irrigation_mtd),
+        received=_format_inches(received),
+        forecast=_format_inches(forecast),
+        deficit_amount=_format_inches(abs(deficit) if deficit != 0 else 0.0),
+        deficit_note=deficit_note,
+        deficit_class=deficit_class,
+        progress_pct=progress_pct,
+        cycle_threshold=_format_inches(inches_per_cycle),
+        headline=headline,
     )
 
 
@@ -116,12 +238,6 @@ def build_dashboard_view(
     preview = snapshot.preview
     loc = settings.location
     evaluation = preview.evaluation
-    balance_ok = evaluation.balance_ok if evaluation is not None else None
-    would_label = format_would_decide_now(
-        preview.would_water,
-        safety_known=preview.safety_known,
-        balance_ok=balance_ok,
-    )
     verdict_label, verdict_class = _verdict_badge(
         preview.would_water,
         sewer_lockout=preview.sewer_lockout,
@@ -132,6 +248,18 @@ def build_dashboard_view(
     )
     deficit = evaluation.deficit if evaluation is not None else None
     forecast_days = settings.balance.forecast_days
+    balance = None
+    if evaluation is not None:
+        balance = _build_balance(
+            evaluation,
+            preview.irrigation_mtd,
+            inches_per_cycle=settings.balance.inches_per_cycle,
+        )
+    last_updated = format_updated(
+        snapshot.state.last_weather_update,
+        loc.timezone,
+        now=snapshot.local_time,
+    )
     sewer_note = None
     if preview.sewer_lockout:
         sewer = settings.sewer
@@ -141,27 +269,35 @@ def build_dashboard_view(
             f"-{sewer.end_month:02d}/{sewer.end_day:02d})"
         )
     records = load_records(history_path(settings), limit=history_limit)
-    rows = tuple(_history_row(record, loc.timezone) for record in reversed(records))
+    rows = _collapse_history_rows(
+        tuple(_history_row(record, loc.timezone) for record in reversed(records))
+    )
     return DashboardView(
         verdict_label=verdict_label,
         verdict_class=verdict_class,
-        relay_text=relay_label(snapshot.state.watering_required),
+        relay_short=_relay_short(snapshot.state.watering_required),
+        hero_subtitle=_hero_subtitle(
+            would_water=preview.would_water,
+            sewer_lockout=preview.sewer_lockout,
+            balance=balance,
+        ),
         live_mode=fetch_live,
-        location=f"{loc.zip_code} ({loc.timezone})",
+        mode_label="Live weather" if fetch_live else "Saved forecast",
+        location_short=loc.zip_code,
+        updated_meta=_updated_meta(last_updated),
         local_time=snapshot.local_time.strftime("%Y-%m-%d %H:%M %Z"),
         next_check=format_duration(snapshot.next_check_seconds),
-        irrigation_mtd=_format_inches(preview.irrigation_mtd),
         rain_mtd=_format_inches(rain_mtd),
+        irrigation_mtd=_format_inches(preview.irrigation_mtd),
         forecast=f"{_format_inches(forecast)} ({forecast_days} days)",
         deficit=_format_inches(deficit),
-        would_decide=would_label,
-        last_updated=format_updated(
-            snapshot.state.last_weather_update,
-            loc.timezone,
-            now=snapshot.local_time,
+        decision_short=_decision_short(
+            preview.would_water,
+            safety_known=preview.safety_known,
         ),
         last_error=snapshot.state.last_error,
         sewer_lockout=sewer_note,
+        balance=balance,
         history_rows=rows,
         refresh_seconds=None if fetch_live else 60,
     )
@@ -220,9 +356,55 @@ def _detail_row(
     )
 
 
+def _balance_card_html(balance: DashboardBalance, esc: Callable[[str], str]) -> str:
+    gap_label = {
+        "need": "Gap to allow cycle",
+        "surplus": "Over target pace",
+        "even": "Balance gap",
+    }[balance.deficit_class]
+    return f"""
+  <section class="card balance-card">
+    <div class="section-head">
+      <h2>Water budget</h2>
+      <span>Target {esc(balance.target)}</span>
+    </div>
+    <p class="balance-headline">{esc(balance.headline)}</p>
+    <div class="balance-track" role="progressbar"
+         aria-valuenow="{balance.progress_pct}" aria-valuemin="0" aria-valuemax="100"
+         aria-label="Water received toward monthly target pace">
+      <div class="balance-fill balance-{esc(balance.deficit_class)}"
+           style="width:{balance.progress_pct}%"></div>
+    </div>
+    <div class="balance-stats">
+      <div class="balance-stat">
+        <span class="balance-stat-label">Rain</span>
+        <span class="balance-stat-value">{esc(balance.rain)}</span>
+      </div>
+      <div class="balance-stat">
+        <span class="balance-stat-label">Irrigation</span>
+        <span class="balance-stat-value">{esc(balance.irrigation)}</span>
+      </div>
+      <div class="balance-stat balance-stat-total">
+        <span class="balance-stat-label">Received</span>
+        <span class="balance-stat-value">{esc(balance.received)}</span>
+      </div>
+    </div>
+    <div class="balance-foot">
+      <div class="balance-foot-row">
+        <span class="balance-foot-label">Forecast credit</span>
+        <span class="balance-foot-value">{esc(balance.forecast)}</span>
+      </div>
+      <div class="balance-foot-row balance-gap balance-gap-{esc(balance.deficit_class)}">
+        <span class="balance-foot-label">{esc(gap_label)}</span>
+        <span class="balance-foot-value">{esc(balance.deficit_amount)}</span>
+      </div>
+      <p class="balance-note">{esc(balance.deficit_note)}</p>
+    </div>
+  </section>"""
+
+
 def render_dashboard_html(view: DashboardView) -> str:
     esc = html.escape
-    mode_label = "Live weather" if view.live_mode else "Cached"
     mode_class = "mode-live" if view.live_mode else "mode-cached"
     refresh_meta = ""
     if view.refresh_seconds is not None:
@@ -251,12 +433,18 @@ def render_dashboard_html(view: DashboardView) -> str:
         )
 
     footer_href = "/" if view.live_mode else "/live"
-    footer_label = "Back to cached view" if view.live_mode else "Refresh live weather"
+    footer_label = "Back to saved forecast" if view.live_mode else "Refresh live weather"
     footer_icon = "←" if view.live_mode else "↻"
-    if view.last_updated == "never":
-        updated_meta = "Awaiting weather"
-    else:
-        updated_meta = f"Updated {view.last_updated}"
+    footer_loading = "false" if view.live_mode else "true"
+    balance_html = (
+        _balance_card_html(view.balance, esc)
+        if view.balance is not None
+        else (
+            '<section class="card balance-card balance-unavailable">'
+            '<p class="empty-state">Water budget will appear after the first weather check.</p>'
+            "</section>"
+        )
+    )
 
     rain_icon = (
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
@@ -460,6 +648,9 @@ body::before {{
   font-size: 0.68rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  max-width: 11rem;
+  line-height: 1.35;
 }}
 .card {{
   background: var(--card);
@@ -542,22 +733,108 @@ body::before {{
   color: #fff;
   text-shadow: 0 2px 8px rgba(0,0,0,0.22);
 }}
-.relay-badge {{
+.hero-subtitle {{
+  margin: 0 0 0.65rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.45;
+  max-width: 21rem;
+  margin-inline: auto;
+  color: var(--text);
+}}
+.relay-short {{
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  max-width: 20rem;
   margin: 0;
-  padding: 0.55rem 0.9rem;
+  padding: 0.45rem 0.75rem;
   border-radius: 999px;
-  background: var(--card-solid);
+  background: rgba(148, 163, 184, 0.1);
   border: 1px solid var(--line);
   color: var(--muted);
-  font-size: 0.84rem;
+  font-size: 0.76rem;
   font-weight: 600;
   line-height: 1.35;
-  box-shadow: var(--shadow-sm);
 }}
+.balance-card {{ padding-bottom: 1rem; }}
+.balance-headline {{
+  margin: 0 0 0.85rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--text);
+  font-weight: 600;
+}}
+.balance-track {{
+  height: 0.72rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  overflow: hidden;
+  margin-bottom: 0.9rem;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+}}
+.balance-fill {{
+  height: 100%;
+  border-radius: inherit;
+  min-width: 0.35rem;
+  transition: width 0.35s ease;
+}}
+.balance-need {{ background: linear-gradient(90deg, #38bdf8, #0d9488); }}
+.balance-surplus {{ background: linear-gradient(90deg, #34d399, #059669); }}
+.balance-even {{ background: linear-gradient(90deg, #2dd4bf, #0f766e); }}
+.balance-stats {{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 0.85rem;
+}}
+.balance-stat {{
+  padding: 0.65rem 0.45rem;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.08);
+  text-align: center;
+}}
+.balance-stat-total {{
+  background: rgba(13, 148, 136, 0.1);
+  border: 1px solid rgba(13, 148, 136, 0.16);
+}}
+.balance-stat-label {{
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}}
+.balance-stat-value {{
+  display: block;
+  font-size: 0.92rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}}
+.balance-foot {{
+  padding-top: 0.15rem;
+  border-top: 1px solid var(--line);
+}}
+.balance-foot-row {{
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0;
+  font-size: 0.84rem;
+}}
+.balance-foot-label {{ color: var(--muted); }}
+.balance-foot-value {{ font-weight: 700; font-variant-numeric: tabular-nums; }}
+.balance-gap-need .balance-foot-value {{ color: #ea580c; }}
+.balance-gap-surplus .balance-foot-value {{ color: #059669; }}
+.balance-gap-even .balance-foot-value {{ color: #0d9488; }}
+.balance-note {{
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted);
+}}
+.balance-unavailable .empty-state {{ padding-top: 0.35rem; }}
 .metrics {{
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -827,6 +1104,17 @@ footer {{
   font-size: 1.08rem;
   line-height: 1;
 }}
+.footer-btn.is-loading {{
+  opacity: 0.92;
+  pointer-events: none;
+}}
+@keyframes spin {{
+  to {{ transform: rotate(360deg); }}
+}}
+.footer-btn.is-loading span {{
+  display: inline-block;
+  animation: spin 0.8s linear infinite;
+}}
 </style>
 </head>
 <body>
@@ -836,24 +1124,29 @@ footer {{
       <div class="brand-icon">{brand_icon}</div>
       <div class="brand-text">
         <span class="brand-title">Rain Bypass</span>
-        <span class="brand-sub">{esc(view.location)}</span>
+        <span class="brand-sub">{esc(view.location_short)}</span>
       </div>
     </div>
     <div class="topbar-meta">
-      <span class="mode-pill {mode_class}">{esc(mode_label)}</span>
-      <span class="updated-pill">{esc(updated_meta)}</span>
+      <span class="mode-pill {mode_class}">{esc(view.mode_label)}</span>
+      <span class="updated-pill">{esc(view.updated_meta)}</span>
     </div>
   </header>
 
-  <section class="card hero hero-{esc(view.verdict_class)}">
+  <section class="card hero hero-{esc(view.verdict_class)}" aria-labelledby="verdict-label">
     <div class="status-stage">
       <div class="status-glow status-ring-{esc(view.verdict_class)}" aria-hidden="true"></div>
-      <div class="status-ring status-ring-{esc(view.verdict_class)}" aria-hidden="true">
-        <span class="status-word">{esc(view.verdict_label)}</span>
+      <div class="status-ring status-ring-{esc(view.verdict_class)}"
+           role="img" id="verdict-label"
+           aria-label="{esc(view.verdict_label)} watering status">
+        <span class="status-word" aria-hidden="true">{esc(view.verdict_label)}</span>
       </div>
     </div>
-    <p class="relay-badge">{esc(view.relay_text)}</p>
+    <p class="hero-subtitle">{esc(view.hero_subtitle)}</p>
+    <p class="relay-short">{esc(view.relay_short)}</p>
   </section>
+
+  {balance_html}
 
   <div class="metrics">
     {_metric_tile("Rain MTD", view.rain_mtd, esc, accent="rain", icon=rain_icon)}
@@ -862,18 +1155,18 @@ footer {{
             "Irrigation", view.irrigation_mtd, esc, accent="irrigation", icon=irrigation_icon
         )
     }
-    {_metric_tile("Deficit", view.deficit, esc, accent="deficit", icon=deficit_icon)}
+    {_metric_tile("Gap", view.deficit, esc, accent="deficit", icon=deficit_icon)}
   </div>
 
   <section class="card">
     <div class="section-head">
-      <h2>Status</h2>
+      <h2>Schedule</h2>
       <span>{esc(view.local_time)}</span>
     </div>
     <ul class="detail-list">
       {_detail_row("Next check", view.next_check, esc)}
       {_detail_row("Forecast", view.forecast, esc)}
-      {_detail_row("Would decide", view.would_decide, esc, highlight=True)}
+      {_detail_row("Next cycle", view.decision_short, esc, highlight=True)}
     </ul>
     {sewer_html}
     {error_html}
@@ -890,9 +1183,22 @@ footer {{
 
 <footer>
   <div class="footer-inner">
-    <a class="footer-btn" href="{footer_href}"><span>{footer_icon}</span>{esc(footer_label)}</a>
+    <a class="footer-btn" href="{footer_href}" data-loading="{footer_loading}">
+      <span>{footer_icon}</span>{esc(footer_label)}
+    </a>
   </div>
 </footer>
+<script>
+(function () {{
+  var btn = document.querySelector('.footer-btn[data-loading="true"]');
+  if (!btn) return;
+  btn.addEventListener('click', function () {{
+    btn.classList.add('is-loading');
+    btn.setAttribute('aria-busy', 'true');
+    btn.innerHTML = '<span>↻</span>Fetching weather…';
+  }});
+}})();
+</script>
 </body>
 </html>"""
 

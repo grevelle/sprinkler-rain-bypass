@@ -5,6 +5,7 @@ import socket
 import threading
 import urllib.error
 import urllib.request
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -20,9 +21,17 @@ from rain_bypass.history import WateringRecord, append_record, history_path
 from rain_bypass.models import Evaluation, Preview
 from rain_bypass.status import StatusSnapshot, gather_status
 from rain_bypass.web import (
+    DashboardBalance,
+    DashboardHistoryRow,
     DashboardHTTPServer,
+    _collapse_history_rows,
+    _decision_short,
+    _hero_subtitle,
+    _history_details,
     _history_verdict,
     _make_handler,
+    _relay_short,
+    _updated_meta,
     _verdict_badge,
     build_dashboard_view,
     render_dashboard_html,
@@ -88,6 +97,82 @@ def test_verdict_badge_allow_block_unknown() -> None:
     assert _verdict_badge(True, sewer_lockout=True) == ("BLOCK", "block")
 
 
+def test_dashboard_copy_helpers() -> None:
+    assert _relay_short(True) == "Hardware relay open — panel can run"
+    assert _relay_short(False) == "Hardware relay closed — panel blocked"
+    assert _relay_short(None) == "Relay status unknown"
+    assert _decision_short(True, safety_known=True) == "Allow if panel runs today"
+    assert _decision_short(False, safety_known=True) == "Skip today's cycle"
+    assert _decision_short(None, safety_known=False) == "Safety unverified — refresh live weather"
+    assert _updated_meta("never") == "Awaiting weather"
+    assert _updated_meta("2024-07-15").startswith("Updated ")
+    assert _hero_subtitle(would_water=False, sewer_lockout=True, balance=None).startswith(
+        "Seasonal"
+    )
+    assert _collapse_history_rows(()) == ()
+    row = DashboardHistoryRow(
+        timestamp="2024-07-15 12:00",
+        verdict="BLOCK",
+        verdict_class="block",
+        credit="+0.00 in",
+        details="test",
+    )
+    assert len(_collapse_history_rows((row, row))) == 1
+    balance = DashboardBalance(
+        target="1.00 in",
+        rain="0.20 in",
+        irrigation="0.30 in",
+        received="0.50 in",
+        forecast="0.00 in",
+        deficit_amount="0.50 in",
+        deficit_note="0.50 in gap before balance allows a cycle (need ≥ 0.10 in)",
+        deficit_class="need",
+        progress_pct=50,
+        cycle_threshold="0.10 in",
+        headline="headline",
+    )
+    assert (
+        _hero_subtitle(would_water=False, sewer_lockout=False, balance=balance)
+        == balance.deficit_note
+    )
+    surplus = replace(balance, deficit_class="surplus", deficit_note="over note")
+    assert _hero_subtitle(would_water=False, sewer_lockout=False, balance=surplus) == (
+        "Water budget met — no extra irrigation needed"
+    )
+    even = replace(balance, deficit_class="even", deficit_note="even note")
+    assert _hero_subtitle(would_water=False, sewer_lockout=False, balance=even) == (
+        "Water budget on target for this period"
+    )
+    assert _decision_short(None, safety_known=True) == "Unknown — refresh live weather"
+    assert (
+        _hero_subtitle(would_water=True, sewer_lockout=False, balance=None)
+        == "Balance allows watering if your panel runs"
+    )
+    assert (
+        _hero_subtitle(would_water=False, sewer_lockout=False, balance=None)
+        == "Today's cycle would be skipped"
+    )
+
+
+def test_history_details_variants() -> None:
+    base = {
+        "checked_at": 1.0,
+        "local_date": "2024-07-15",
+        "allowed": False,
+        "inches_credited": 0.0,
+        "irrigation_mtd": 0.3,
+    }
+    assert "Sewer lockout" in _history_details(WateringRecord(**{**base, "sewer_lockout": True}))  # type: ignore[arg-type]
+    assert "weather check failed" in _history_details(
+        WateringRecord(**{**base, "weather_error": "timeout"})  # type: ignore[arg-type]
+    )
+    assert "credited" in _history_details(WateringRecord(**{**base, "allowed": True}))  # type: ignore[arg-type]
+    assert "still needed" in _history_details(
+        WateringRecord(**{**base, "deficit": 0.2})  # type: ignore[arg-type]
+    )
+    assert "balance satisfied" in _history_details(WateringRecord(**base))  # type: ignore[arg-type]
+
+
 def test_history_verdict_variants() -> None:
     base = {
         "checked_at": 1.0,
@@ -114,6 +199,37 @@ def test_build_dashboard_view_cached(settings, settings_path: Path, monkeypatch)
     assert view.live_mode is False
     assert view.refresh_seconds == 60
     assert view.irrigation_mtd == "0.63 in"
+    assert view.mode_label == "Saved forecast"
+    assert view.balance is not None
+    assert "received" in view.balance.headline
+    assert view.decision_short == "Allow if panel runs today"
+
+
+def test_build_dashboard_view_balance_surplus(settings, settings_path: Path, monkeypatch) -> None:
+    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
+    preview = _preview(
+        evaluation=_evaluation(
+            deficit=-0.1,
+            target_to_date=0.5,
+            rain_mtd=0.4,
+        ),
+        irrigation_mtd=0.3,
+    )
+    snapshot = _snapshot(settings, preview=preview)
+    monkeypatch.setattr("rain_bypass.web.gather_status", lambda *_a, **_k: snapshot)
+    view = build_dashboard_view(settings_path)
+    assert view.balance is not None
+    assert view.balance.deficit_class == "surplus"
+
+
+def test_build_dashboard_view_balance_even(settings, settings_path: Path, monkeypatch) -> None:
+    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
+    preview = _preview(evaluation=_evaluation(deficit=0.0))
+    snapshot = _snapshot(settings, preview=preview)
+    monkeypatch.setattr("rain_bypass.web.gather_status", lambda *_a, **_k: snapshot)
+    view = build_dashboard_view(settings_path)
+    assert view.balance is not None
+    assert view.balance.deficit_class == "even"
 
 
 def test_build_dashboard_view_live_and_sewer(settings, settings_path: Path, monkeypatch) -> None:
@@ -173,9 +289,11 @@ def test_build_dashboard_view_error_and_no_evaluation(
     view = build_dashboard_view(settings_path)
     html_text = render_dashboard_html(view)
     assert view.last_error == "<script>alert(1)</script>"
-    assert "<script>" not in html_text
+    assert "<script>alert(1)</script>" not in html_text
     assert "&lt;script&gt;" in html_text
     assert view.verdict_label == "UNKNOWN"
+    assert view.balance is None
+    assert "Water budget will appear" in html_text
 
 
 def test_render_dashboard_html_links(settings, settings_path: Path, monkeypatch) -> None:
@@ -185,9 +303,11 @@ def test_render_dashboard_html_links(settings, settings_path: Path, monkeypatch)
     cached = render_dashboard_html(build_dashboard_view(settings_path, fetch_live=False))
     live = render_dashboard_html(build_dashboard_view(settings_path, fetch_live=True))
     assert 'href="/live"' in cached
+    assert 'data-loading="true"' in cached
     assert 'http-equiv="refresh"' in cached
     assert 'href="/"' in live
     assert 'http-equiv="refresh"' not in live
+    assert "Saved forecast" in cached
 
 
 def test_render_dashboard_html_empty_history(settings, settings_path: Path, monkeypatch) -> None:
@@ -271,6 +391,29 @@ def test_render_with_history_rows(settings, settings_path: Path, monkeypatch) ->
     html_text = render_dashboard_html(build_dashboard_view(settings_path))
     assert "history-list" in html_text
     assert "+0.30 in" in html_text
+    assert "Irrigation credited" in html_text
+    assert "Water budget" in html_text
+
+
+def test_history_collapse_duplicate_timestamp(settings, settings_path: Path, monkeypatch) -> None:
+    patch_local_today(monkeypatch, datetime(2024, 7, 15).date())
+    snapshot = _snapshot(settings)
+    monkeypatch.setattr("rain_bypass.web.gather_status", lambda *_a, **_k: snapshot)
+    path = history_path(settings)
+    ts = 1_721_000_000.0
+    for allowed, credit in ((False, 0.0), (True, 0.63)):
+        append_record(
+            path,
+            WateringRecord(
+                checked_at=ts,
+                local_date="2024-07-15",
+                allowed=allowed,
+                inches_credited=credit,
+                irrigation_mtd=0.63,
+            ),
+        )
+    view = build_dashboard_view(settings_path)
+    assert len(view.history_rows) == 1
 
 
 def test_cli_serve_keyboard_interrupt(monkeypatch, settings_path: Path) -> None:
