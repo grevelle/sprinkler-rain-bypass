@@ -119,6 +119,18 @@ def test_write_settings_round_trip(tmp_path: Path):
     assert loaded.watering.event_lookback_days == source.watering.event_lookback_days
 
 
+def test_write_settings_history_path(tmp_path: Path):
+    custom = tmp_path / "logs" / "water.jsonl"
+    source = load_example_settings(
+        weather={"api_key": "history-path"},
+        runtime={"history_path": custom},
+    )
+    path = tmp_path / "settings.toml"
+    write_settings(path, source)
+    loaded = load_settings(path)
+    assert loaded.runtime.history_path == custom
+
+
 def test_load_example_settings_missing_file(tmp_path: Path, monkeypatch):
     missing = tmp_path / "missing.example.toml"
     monkeypatch.setattr("rain_bypass.config.EXAMPLE_SETTINGS_PATH", missing)

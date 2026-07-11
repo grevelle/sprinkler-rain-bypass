@@ -162,13 +162,15 @@ def test_live_main_once_persists_state(live_case: LiveCase) -> None:
     assert saved.rainfall_inches is not None
     assert saved.forecast_inches is not None
     assert saved.last_error is None
+    from rain_bypass.history import irrigation_mtd
+
     snapshot = fetch_weather(settings)
     today = local_today(settings.location)
     expected = balance.balance_allows_watering(
         today,
         settings,
         snapshot.rain_mtd,
-        saved.irrigation_inches_mtd,
+        irrigation_mtd(settings, today),
         snapshot.forecast_inches,
     ) and safety_allows_watering(snapshot, settings)
     assert saved.watering_required is expected

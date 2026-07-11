@@ -208,7 +208,7 @@ def format_status(snapshot: StatusSnapshot) -> str:
         ),
         _line("Rain (saved)", _inch(snapshot.state.rainfall_inches)),
         _line("Forecast (saved)", _inch(snapshot.state.forecast_inches)),
-        _line("Irrigation MTD", _inch(pv.effective_state.irrigation_inches_mtd)),
+        _line("Irrigation MTD", _inch(pv.irrigation_mtd)),
     ]
     if snapshot.state.last_error:
         lines.append(_line("Last error", snapshot.state.last_error))
@@ -247,7 +247,7 @@ def format_status(snapshot: StatusSnapshot) -> str:
                 lines,
                 month_name=month_name,
                 evaluation=pv.evaluation,
-                irrigation_mtd=pv.effective_state.irrigation_inches_mtd,
+                irrigation_mtd=pv.irrigation_mtd,
                 inches_per_cycle=b.inches_per_cycle,
                 safety_known=True,
             )
@@ -267,7 +267,7 @@ def format_status(snapshot: StatusSnapshot) -> str:
             lines,
             month_name=month_name,
             evaluation=evaluation,
-            irrigation_mtd=pv.effective_state.irrigation_inches_mtd,
+            irrigation_mtd=pv.irrigation_mtd,
             inches_per_cycle=b.inches_per_cycle,
             safety_known=pv.safety_known,
         )

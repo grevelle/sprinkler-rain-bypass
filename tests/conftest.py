@@ -37,7 +37,12 @@ def patch_local_today(monkeypatch: pytest.MonkeyPatch, fixed: date) -> date:
 @pytest.fixture
 def settings_path(tmp_path: Path) -> Path:
     path = tmp_path / "settings.toml"
-    write_settings(path, load_example_settings(**TEST_SETTINGS_OVERRIDES))
+    overrides = dict(TEST_SETTINGS_OVERRIDES)
+    overrides["runtime"] = {
+        **TEST_SETTINGS_OVERRIDES["runtime"],
+        "state_path": tmp_path / "state.json",
+    }
+    write_settings(path, load_example_settings(**overrides))
     return path
 
 

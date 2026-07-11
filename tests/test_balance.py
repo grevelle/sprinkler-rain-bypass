@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from rain_bypass import balance
-from rain_bypass.config import State, load_example_settings
+from rain_bypass.config import load_example_settings
 
 
 @pytest.fixture
@@ -67,24 +67,3 @@ def test_balance_blocks_when_deficit_below_cycle(settings):
 
 def test_balance_blocks_dormant_month(settings):
     assert balance.balance_allows_watering(date(2024, 1, 10), settings, 0.0, 0.0, 0.0) is False
-
-
-def test_ensure_balance_month_resets_irrigation():
-    state = State(balance_month=6, irrigation_inches_mtd=1.2)
-    updated = balance.ensure_balance_month(state, date(2024, 7, 1))
-    assert updated.balance_month == 7
-    assert updated.irrigation_inches_mtd == pytest.approx(0.0)
-
-
-def test_refresh_balance_state_credits_on_switch_on(settings):
-    today = date(2024, 7, 10)
-    state = State(balance_month=7, irrigation_inches_mtd=0.3)
-    updated = balance.refresh_balance_state(state, today, switch_on=True, settings=settings)
-    assert updated.irrigation_inches_mtd == pytest.approx(0.6)
-
-
-def test_refresh_balance_state_no_credit_when_off(settings):
-    today = date(2024, 7, 10)
-    state = State(balance_month=7, irrigation_inches_mtd=0.3)
-    updated = balance.refresh_balance_state(state, today, switch_on=False, settings=settings)
-    assert updated.irrigation_inches_mtd == pytest.approx(0.3)

@@ -186,6 +186,7 @@ def test_format_status_sections(settings, monkeypatch) -> None:
         "rain_bypass.logic.fetch_weather",
         lambda _s: weather_snapshot(rain_mtd=1.0, forecast=0.2, max_daily=0.1),
     )
+    monkeypatch.setattr("rain_bypass.logic.irrigation_mtd", lambda _s, _t: 0.3)
     state = State(
         watering_required=True,
         last_weather_update=1_700_000_000.0,
@@ -193,7 +194,6 @@ def test_format_status_sections(settings, monkeypatch) -> None:
         forecast_inches=0.2,
         max_daily_inches=0.1,
         freeze_block=False,
-        irrigation_inches_mtd=0.3,
         last_error="previous failure",
     )
     text = format_status(gather_status(settings, state))
@@ -253,7 +253,6 @@ def test_format_status_cached_missing_safety_fields(settings, monkeypatch) -> No
         watering_required=False,
         rainfall_inches=0.0,
         forecast_inches=0.0,
-        irrigation_inches_mtd=0.0,
     )
     text = format_status(gather_status(settings, state, fetch_live=False))
     assert "Max day" in text
@@ -292,6 +291,7 @@ def test_format_status_live_without_weather_payload(settings, monkeypatch) -> No
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     preview_result = Preview(
         effective_state=State(),
+        irrigation_mtd=0.0,
         sewer_lockout=False,
         live=None,
         live_error=None,

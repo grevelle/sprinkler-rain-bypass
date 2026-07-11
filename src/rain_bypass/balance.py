@@ -3,7 +3,7 @@ from __future__ import annotations
 import calendar
 from datetime import date
 
-from rain_bypass.config import Settings, State
+from rain_bypass.config import Settings
 
 
 def month_start(today: date) -> date:
@@ -41,19 +41,3 @@ def balance_allows_watering(
         return False
     deficit = compute_deficit(today, settings, rain_mtd, irrigation_mtd, forecast_inches)
     return deficit >= settings.balance.inches_per_cycle
-
-
-def ensure_balance_month(state: State, today: date) -> State:
-    if state.balance_month == today.month:
-        return state
-    return state.model_copy(update={"balance_month": today.month, "irrigation_inches_mtd": 0.0})
-
-
-def refresh_balance_state(
-    state: State, today: date, *, switch_on: bool, settings: Settings
-) -> State:
-    state = ensure_balance_month(state, today)
-    if not switch_on:
-        return state
-    credited = state.irrigation_inches_mtd + settings.balance.inches_per_cycle
-    return state.model_copy(update={"irrigation_inches_mtd": credited})

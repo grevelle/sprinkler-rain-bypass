@@ -8,6 +8,7 @@ import typer
 
 from rain_bypass.config import ConfigError, load_settings
 from rain_bypass.controller import run
+from rain_bypass.history import print_history
 from rain_bypass.logging_setup import configure_logging
 from rain_bypass.status import print_status
 
@@ -57,6 +58,25 @@ def status(
     """Print a text dashboard of weather, balance, and relay state."""
     try:
         print_status(config, fetch_live=not cached)
+    except ConfigError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+
+
+@app.command("history")
+def history(
+    config: Annotated[
+        Path,
+        typer.Option("-c", "--config", help="Path to settings.toml"),
+    ] = Path("settings.toml"),
+    limit: Annotated[
+        int,
+        typer.Option("--limit", help="Maximum number of recent records to show", min=1),
+    ] = 30,
+) -> None:
+    """Show recent watering decisions (append-only log from each control cycle)."""
+    try:
+        print_history(config, limit=limit)
     except ConfigError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None

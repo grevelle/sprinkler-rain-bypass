@@ -59,7 +59,6 @@ def test_preview_cached_projects_from_saved_weather(settings, monkeypatch) -> No
         forecast_inches=0.0,
         max_daily_inches=0.0,
         freeze_block=False,
-        irrigation_inches_mtd=0.0,
     )
     result = preview(settings, state, fetch_live=False)
     assert result.from_saved_weather is True
@@ -74,7 +73,6 @@ def test_preview_cached_safety_unknown_when_not_saved(settings, monkeypatch) -> 
         watering_required=True,
         rainfall_inches=0.0,
         forecast_inches=0.0,
-        irrigation_inches_mtd=0.0,
     )
     result = preview(settings, state, fetch_live=False)
     assert result.safety_known is False
@@ -87,7 +85,6 @@ def test_preview_cached_safety_unknown_blocks_on_balance(settings, monkeypatch) 
         watering_required=True,
         rainfall_inches=10.0,
         forecast_inches=0.0,
-        irrigation_inches_mtd=0.0,
     )
     result = preview(settings, state, fetch_live=False)
     assert result.safety_known is False
@@ -134,6 +131,7 @@ def test_preview_would_water_from_evaluation() -> None:
     )
     result = Preview(
         effective_state=State(),
+        irrigation_mtd=0.0,
         sewer_lockout=False,
         live=None,
         live_error=None,

@@ -265,7 +265,17 @@ def test_decide_allows_when_balance_and_safety_ok(settings, monkeypatch):
     assert decision.evaluation is not None
     assert decision.evaluation.balance_ok is True
     assert decision.evaluation.rain_mtd == pytest.approx(0.0)
-    assert decision.irrigation_inches_mtd == pytest.approx(0.3)
+    assert decision.irrigation_inches_mtd == pytest.approx(0.0)
+
+
+def test_state_load_strips_legacy_irrigation_fields(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text(
+        '{"irrigation_inches_mtd": 0.66, "balance_month": 7, "watering_required": true}\n',
+        encoding="utf-8",
+    )
+    loaded = State.load(path)
+    assert loaded.watering_required is True
 
 
 def test_decide_blocks_when_forecast_fills_deficit(settings, monkeypatch):
@@ -333,14 +343,11 @@ def test_state_round_trip(tmp_path):
         watering_required=True,
         rainfall_inches=0.25,
         forecast_inches=0.1,
-        balance_month=7,
-        irrigation_inches_mtd=0.66,
     )
     state.save(path)
     loaded = State.load(path)
     assert loaded.rainfall_inches == pytest.approx(0.25)
-    assert loaded.balance_month == 7
-    assert loaded.irrigation_inches_mtd == pytest.approx(0.66)
+    assert loaded.forecast_inches == pytest.approx(0.1)
 
 
 def test_in_sewer_lockout(settings):
@@ -373,7 +380,6 @@ def test_fail_mode_keep_last_state(settings, monkeypatch):
         watering_required=True,
         rainfall_inches=0.1,
         forecast_inches=0.05,
-        balance_month=7,
     )
     monkeypatch.setattr("rain_bypass.logic.fetch_weather", _weather_error)
     decision = decide(settings, state)
@@ -413,11 +419,15 @@ def test_tick_persists_balance_state(settings, tmp_path, monkeypatch):
     monkeypatch.setattr(
         "rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0, 0.0, 0.0)
     )
-    saved = tick(settings, State(), lambda _required: None)
-    assert saved.irrigation_inches_mtd == pytest.approx(0.3)
-    assert saved.balance_month == 7
-    loaded = State.load(state_path)
-    assert loaded.irrigation_inches_mtd == pytest.approx(0.3)
+    tick(settings, State(), lambda _required: None)
+    from rain_bypass.history import history_path, irrigation_mtd, load_records
+
+    path = history_path(settings)
+    assert path.is_file()
+    assert irrigation_mtd(settings, date(2024, 7, 15)) == pytest.approx(0.3)
+    records = load_records(path)
+    assert len(records) == 1
+    assert records[0].inches_credited == pytest.approx(0.3)
 
 
 def _timeline_days(

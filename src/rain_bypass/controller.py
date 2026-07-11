@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from rain_bypass.config import Settings, State
 from rain_bypass.gpio import PinFactory, watering_pins
+from rain_bypass.history import append_watering_history, migrate_legacy_irrigation
 from rain_bypass.logic import decide
 from rain_bypass.models import Decision, Evaluation
 
@@ -38,6 +39,7 @@ def _weather_fields(
 def tick(settings: Settings, state: State, apply: Callable[[bool], None]) -> State:
     decision = decide(settings, state)
     apply(decision.watering_required)
+    append_watering_history(settings, state, decision)
     rainfall_inches, forecast_inches, max_daily_inches, freeze_block = _weather_fields(
         decision, state
     )
@@ -49,16 +51,6 @@ def tick(settings: Settings, state: State, apply: Callable[[bool], None]) -> Sta
             "forecast_inches": forecast_inches,
             "max_daily_inches": max_daily_inches,
             "freeze_block": freeze_block,
-            "balance_month": (
-                decision.balance_month
-                if decision.balance_month is not None
-                else state.balance_month
-            ),
-            "irrigation_inches_mtd": (
-                decision.irrigation_inches_mtd
-                if decision.irrigation_inches_mtd is not None
-                else state.irrigation_inches_mtd
-            ),
             "last_error": decision.error,
         }
     )
@@ -77,6 +69,7 @@ def run(
     from rain_bypass.windows import seconds_until_next_check
 
     wait = seconds_until_check or seconds_until_next_check
+    migrate_legacy_irrigation(settings)
     state = State.load(settings.runtime.state_path)
     with pin_factory(settings.gpio) as driver:
         initial = state.watering_required if state.watering_required is not None else False

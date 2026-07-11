@@ -127,6 +127,7 @@ class Gpio(FrozenModel):
 
 class Runtime(FrozenModel):
     state_path: Path = Path("state.json")
+    history_path: Path | None = None
     fail_mode: FailMode = FailMode.DISABLE_WATERING
     log_level: str = "INFO"
     weather_timeout_seconds: int = Field(default=45, ge=1)
@@ -154,8 +155,6 @@ class State(FrozenModel):
     forecast_inches: float | None = None
     max_daily_inches: float | None = None
     freeze_block: bool | None = None
-    balance_month: int | None = None
-    irrigation_inches_mtd: float = 0.0
     last_error: str | None = None
 
     @classmethod
@@ -166,6 +165,8 @@ class State(FrozenModel):
         if isinstance(raw, dict):
             data = cast(dict[str, Any], raw)
             data.pop("blocked_until", None)
+            data.pop("irrigation_inches_mtd", None)
+            data.pop("balance_month", None)
             return cls.model_validate(data)
         return cls.model_validate(raw)
 
@@ -234,7 +235,13 @@ def load_example_settings(**sections: Mapping[str, Any]) -> Settings:
 
 def settings_to_toml_dict(settings: Settings) -> dict[str, Any]:
     data = settings.model_dump()
-    data["runtime"]["state_path"] = str(settings.runtime.state_path)
+    runtime = dict(data["runtime"])
+    runtime["state_path"] = str(settings.runtime.state_path)
+    if settings.runtime.history_path is None:
+        runtime.pop("history_path", None)
+    else:
+        runtime["history_path"] = str(settings.runtime.history_path)
+    data["runtime"] = runtime
     balance = dict(data["balance"])
     balance.pop("monthly", None)
     data["balance"] = balance

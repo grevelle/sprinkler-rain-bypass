@@ -2,6 +2,7 @@
 venv/
 settings.toml
 state.json
+watering_history.jsonl
 
 __pycache__/
 *.py[cod]

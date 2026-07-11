@@ -127,6 +127,16 @@ source .venv/bin/activate
 rain-bypass status --cached
 ```
 
+### Watering history
+
+Each control cycle (`--once` or the daily check) appends one line to **`watering_history.jsonl`** next to `state.json` (or `runtime.history_path` if set). **This file is the single source of truth** for how much irrigation has been credited this month — balance decisions sum `inches_credited` from the log; `state.json` holds only relay and weather snapshot fields. Records older than one year are dropped automatically on each append. This logs the bypass **decision** and inches credited — not confirmation that Rain Bird actually ran.
+
+```bash
+cd ~/sprinkler-rain-bypass
+.venv/bin/python -m rain_bypass history
+rain-bypass history --limit 14
+```
+
 ### Logs
 
 ```bash
@@ -312,7 +322,7 @@ After editing `settings.toml`, run `status` or `--once` to confirm the new logic
 | `sewer`    | `start_month/day`, `end_month/day` — hard block window (annual sewer cap)                                                                                                                                                             |
 | `weather`  | `api_key` (Visual Crossing Timeline API)                                                                                                                                                                                              |
 | `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`                                                                                                                                                                      |
-| `runtime`  | `state_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`                                                                                                                                                                     |
+| `runtime`  | `state_path`, optional `history_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`                                                                                                                                                                     |
 
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
@@ -368,7 +378,7 @@ Layered Python package under `src/rain_bypass/`:
 
 | Layer | Modules |
 | ----- | ------- |
-| **Core** | `paths`, `config`, `models`, `balance`, `windows`, `weather`, `logic`, `controller`, `gpio`, `status`, `cli` |
+| **Core** | `paths`, `config`, `models`, `balance`, `windows`, `weather`, `logic`, `controller`, `gpio`, `status`, `history`, `cli` |
 | **Installer** | `install_cli` (Typer app), `install_flow`, `install_prompts`, `prompting` |
 | **Deploy** | `deploy` (systemd unit + auto-update timer) |
 | **Support** | `platform`, `logging_setup`, `exceptions` |

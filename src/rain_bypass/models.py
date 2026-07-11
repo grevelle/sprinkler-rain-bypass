@@ -30,6 +30,7 @@ class Evaluation:
 @dataclass(frozen=True, slots=True)
 class Preview:
     effective_state: State
+    irrigation_mtd: float
     sewer_lockout: bool
     live: WeatherSnapshot | None
     live_error: str | None
