@@ -5,7 +5,6 @@ import socket
 import threading
 import urllib.error
 import urllib.request
-from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -21,11 +20,11 @@ from rain_bypass.history import WateringRecord, append_record, history_path
 from rain_bypass.models import Evaluation, Preview
 from rain_bypass.status import StatusSnapshot, gather_status
 from rain_bypass.web import (
-    DashboardBalance,
     DashboardHistoryRow,
     DashboardHTTPServer,
     _collapse_history_rows,
     _decision_short,
+    _format_inches,
     _hero_subtitle,
     _history_details,
     _history_verdict,
@@ -90,6 +89,11 @@ def _snapshot(
     )
 
 
+def test_format_inches_none() -> None:
+    assert _format_inches(None) == "n/a"
+    assert _format_inches(0.5) == "0.50 in"
+
+
 def test_verdict_badge_allow_block_unknown() -> None:
     assert _verdict_badge(True, sewer_lockout=False) == ("ALLOW", "allow")
     assert _verdict_badge(False, sewer_lockout=False) == ("BLOCK", "block")
@@ -106,7 +110,7 @@ def test_dashboard_copy_helpers() -> None:
     assert _decision_short(None, safety_known=False) == "Safety unverified — refresh live weather"
     assert _updated_meta("never") == "Awaiting weather"
     assert _updated_meta("2024-07-15").startswith("Updated ")
-    assert _hero_subtitle(would_water=False, sewer_lockout=True, balance=None).startswith(
+    assert _hero_subtitle(sewer_lockout=True, decision_short="Skip today's cycle").startswith(
         "Seasonal"
     )
     assert _collapse_history_rows(()) == ()
@@ -118,40 +122,10 @@ def test_dashboard_copy_helpers() -> None:
         details="test",
     )
     assert len(_collapse_history_rows((row, row))) == 1
-    balance = DashboardBalance(
-        target="1.00 in",
-        rain="0.20 in",
-        irrigation="0.30 in",
-        received="0.50 in",
-        forecast="0.00 in",
-        deficit_amount="0.50 in",
-        deficit_note="0.50 in gap before balance allows a cycle (need ≥ 0.10 in)",
-        deficit_class="need",
-        progress_pct=50,
-        cycle_threshold="0.10 in",
-        headline="headline",
-    )
-    assert (
-        _hero_subtitle(would_water=False, sewer_lockout=False, balance=balance)
-        == balance.deficit_note
-    )
-    surplus = replace(balance, deficit_class="surplus", deficit_note="over note")
-    assert _hero_subtitle(would_water=False, sewer_lockout=False, balance=surplus) == (
-        "Water budget met — no extra irrigation needed"
-    )
-    even = replace(balance, deficit_class="even", deficit_note="even note")
-    assert _hero_subtitle(would_water=False, sewer_lockout=False, balance=even) == (
-        "Water budget on target for this period"
+    assert _hero_subtitle(sewer_lockout=False, decision_short="Skip today's cycle") == (
+        "Skip today's cycle"
     )
     assert _decision_short(None, safety_known=True) == "Unknown — refresh live weather"
-    assert (
-        _hero_subtitle(would_water=True, sewer_lockout=False, balance=None)
-        == "Balance allows watering if your panel runs"
-    )
-    assert (
-        _hero_subtitle(would_water=False, sewer_lockout=False, balance=None)
-        == "Today's cycle would be skipped"
-    )
 
 
 def test_history_details_variants() -> None:
@@ -198,11 +172,10 @@ def test_build_dashboard_view_cached(settings, settings_path: Path, monkeypatch)
     assert view.verdict_label == "ALLOW"
     assert view.live_mode is False
     assert view.refresh_seconds == 60
-    assert view.irrigation_mtd == "0.63 in"
     assert view.mode_label == "Saved forecast"
     assert view.balance is not None
     assert "received" in view.balance.headline
-    assert view.decision_short == "Allow if panel runs today"
+    assert view.hero_subtitle == "Allow if panel runs today"
 
 
 def test_build_dashboard_view_balance_surplus(settings, settings_path: Path, monkeypatch) -> None:
@@ -393,6 +366,7 @@ def test_render_with_history_rows(settings, settings_path: Path, monkeypatch) ->
     assert "+0.30 in" in html_text
     assert "Irrigation credited" in html_text
     assert "Water budget" in html_text
+    assert "next-check-value" in html_text
 
 
 def test_history_collapse_duplicate_timestamp(settings, settings_path: Path, monkeypatch) -> None:

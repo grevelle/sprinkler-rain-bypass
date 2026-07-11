@@ -43,6 +43,7 @@ class DashboardBalance:
     irrigation: str
     received: str
     forecast: str
+    forecast_label: str
     deficit_amount: str
     deficit_note: str
     deficit_class: str
@@ -63,11 +64,6 @@ class DashboardView:
     updated_meta: str
     local_time: str
     next_check: str
-    rain_mtd: str
-    irrigation_mtd: str
-    forecast: str
-    deficit: str
-    decision_short: str
     last_error: str | None
     sewer_lockout: str | None
     balance: DashboardBalance | None
@@ -147,25 +143,10 @@ def _decision_short(would_water: bool | None, *, safety_known: bool) -> str:
     return "Unknown — refresh live weather"
 
 
-def _hero_subtitle(
-    *,
-    would_water: bool | None,
-    sewer_lockout: bool,
-    balance: DashboardBalance | None,
-) -> str:
+def _hero_subtitle(*, sewer_lockout: bool, decision_short: str) -> str:
     if sewer_lockout:
         return "Seasonal sewer lockout — watering blocked"
-    if balance is not None:
-        if balance.deficit_class == "need":
-            return balance.deficit_note
-        if balance.deficit_class == "surplus":
-            return "Water budget met — no extra irrigation needed"
-        return "Water budget on target for this period"
-    if would_water is True:
-        return "Balance allows watering if your panel runs"
-    if would_water is False:
-        return "Today's cycle would be skipped"
-    return "Waiting for a completed weather check"
+    return decision_short
 
 
 def _updated_meta(last_updated: str) -> str:
@@ -179,6 +160,7 @@ def _build_balance(
     irrigation_mtd: float,
     *,
     inches_per_cycle: float,
+    forecast_days: int,
 ) -> DashboardBalance:
     rain = evaluation.rain_mtd
     forecast = evaluation.forecast_inches
@@ -207,6 +189,7 @@ def _build_balance(
         irrigation=_format_inches(irrigation_mtd),
         received=_format_inches(received),
         forecast=_format_inches(forecast),
+        forecast_label=f"Forecast credit ({forecast_days} days)",
         deficit_amount=_format_inches(abs(deficit) if deficit != 0 else 0.0),
         deficit_note=deficit_note,
         deficit_class=deficit_class,
@@ -242,11 +225,6 @@ def build_dashboard_view(
         preview.would_water,
         sewer_lockout=preview.sewer_lockout,
     )
-    rain_mtd = evaluation.rain_mtd if evaluation is not None else snapshot.state.rainfall_inches
-    forecast = (
-        evaluation.forecast_inches if evaluation is not None else snapshot.state.forecast_inches
-    )
-    deficit = evaluation.deficit if evaluation is not None else None
     forecast_days = settings.balance.forecast_days
     balance = None
     if evaluation is not None:
@@ -254,6 +232,7 @@ def build_dashboard_view(
             evaluation,
             preview.irrigation_mtd,
             inches_per_cycle=settings.balance.inches_per_cycle,
+            forecast_days=forecast_days,
         )
     last_updated = format_updated(
         snapshot.state.last_weather_update,
@@ -272,14 +251,17 @@ def build_dashboard_view(
     rows = _collapse_history_rows(
         tuple(_history_row(record, loc.timezone) for record in reversed(records))
     )
+    decision = _decision_short(
+        preview.would_water,
+        safety_known=preview.safety_known,
+    )
     return DashboardView(
         verdict_label=verdict_label,
         verdict_class=verdict_class,
         relay_short=_relay_short(snapshot.state.watering_required),
         hero_subtitle=_hero_subtitle(
-            would_water=preview.would_water,
             sewer_lockout=preview.sewer_lockout,
-            balance=balance,
+            decision_short=decision,
         ),
         live_mode=fetch_live,
         mode_label="Live weather" if fetch_live else "Saved forecast",
@@ -287,14 +269,6 @@ def build_dashboard_view(
         updated_meta=_updated_meta(last_updated),
         local_time=snapshot.local_time.strftime("%Y-%m-%d %H:%M %Z"),
         next_check=format_duration(snapshot.next_check_seconds),
-        rain_mtd=_format_inches(rain_mtd),
-        irrigation_mtd=_format_inches(preview.irrigation_mtd),
-        forecast=f"{_format_inches(forecast)} ({forecast_days} days)",
-        deficit=_format_inches(deficit),
-        decision_short=_decision_short(
-            preview.would_water,
-            safety_known=preview.safety_known,
-        ),
         last_error=snapshot.state.last_error,
         sewer_lockout=sewer_note,
         balance=balance,
@@ -317,41 +291,6 @@ def _history_item_html(row: DashboardHistoryRow, esc: Callable[[str], str]) -> s
         f"</div>"
         f'<p class="history-details">{esc(row.details)}</p>'
         f"</div>"
-        f"</li>"
-    )
-
-
-def _metric_tile(
-    label: str,
-    value: str,
-    esc: Callable[[str], str],
-    *,
-    accent: str = "",
-    icon: str = "",
-) -> str:
-    accent_class = f" metric-{accent}" if accent else ""
-    icon_html = f'<span class="metric-icon" aria-hidden="true">{icon}</span>' if icon else ""
-    return (
-        f'<div class="metric{accent_class}">'
-        f"{icon_html}"
-        f'<span class="metric-label">{esc(label)}</span>'
-        f'<span class="metric-value">{esc(value)}</span>'
-        f"</div>"
-    )
-
-
-def _detail_row(
-    label: str,
-    value: str,
-    esc: Callable[[str], str],
-    *,
-    highlight: bool = False,
-) -> str:
-    row_class = " detail-row-highlight" if highlight else ""
-    return (
-        f'<li class="detail-row{row_class}">'
-        f'<span class="detail-label">{esc(label)}</span>'
-        f'<span class="detail-value">{esc(value)}</span>'
         f"</li>"
     )
 
@@ -391,7 +330,7 @@ def _balance_card_html(balance: DashboardBalance, esc: Callable[[str], str]) -> 
     </div>
     <div class="balance-foot">
       <div class="balance-foot-row">
-        <span class="balance-foot-label">Forecast credit</span>
+        <span class="balance-foot-label">{esc(balance.forecast_label)}</span>
         <span class="balance-foot-value">{esc(balance.forecast)}</span>
       </div>
       <div class="balance-foot-row balance-gap balance-gap-{esc(balance.deficit_class)}">
@@ -446,22 +385,6 @@ def render_dashboard_html(view: DashboardView) -> str:
         )
     )
 
-    rain_icon = (
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
-        '<path d="M20 16.2A4.5 4.5 0 0 0 17.5 8h-.3A6 6 0 1 0 6 16.2"/>'
-        '<path d="M8 19v2M12 19v2M16 19v2"/>'
-        "</svg>"
-    )
-    irrigation_icon = (
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
-        '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>'
-        "</svg>"
-    )
-    deficit_icon = (
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
-        '<path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-6"/>'
-        "</svg>"
-    )
     brand_icon = (
         '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">'
         '<path d="M12 2.5c0 0-6 6.2-6 10.8a6 6 0 0 0 12 0C18 8.7 12 2.5 12 2.5z"'
@@ -835,56 +758,14 @@ body::before {{
   color: var(--muted);
 }}
 .balance-unavailable .empty-state {{ padding-top: 0.35rem; }}
-.metrics {{
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.6rem;
-  margin-bottom: 0.9rem;
-}}
-.metric {{
-  background: var(--card);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-sm);
-  padding: 0.85rem 0.5rem 0.75rem;
-  text-align: center;
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}}
-.metric-icon {{
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.85rem;
-  height: 1.85rem;
-  border-radius: 10px;
-  margin-bottom: 0.45rem;
-  background: rgba(148, 163, 184, 0.12);
-  color: var(--muted);
-}}
-.metric-icon svg {{ width: 1rem; height: 1rem; }}
-.metric-rain .metric-icon {{ background: rgba(2, 132, 199, 0.12); color: #0284c7; }}
-.metric-irrigation .metric-icon {{ background: rgba(13, 148, 136, 0.12); color: #0d9488; }}
-.metric-deficit .metric-icon {{ background: rgba(234, 88, 12, 0.12); color: #ea580c; }}
-.metric-label {{
-  display: block;
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 0.28rem;
-}}
-.metric-value {{
-  display: block;
-  font-size: 1.02rem;
+.schedule-card {{ padding-bottom: 1rem; }}
+.next-check-value {{
+  margin: 0;
+  font-size: 1.65rem;
   font-weight: 800;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }}
-.metric-rain .metric-value {{ color: #0284c7; }}
-.metric-irrigation .metric-value {{ color: #0d9488; }}
-.metric-deficit .metric-value {{ color: #ea580c; }}
 .section-head {{
   display: flex;
   align-items: baseline;
@@ -1148,26 +1029,12 @@ footer {{
 
   {balance_html}
 
-  <div class="metrics">
-    {_metric_tile("Rain MTD", view.rain_mtd, esc, accent="rain", icon=rain_icon)}
-    {
-        _metric_tile(
-            "Irrigation", view.irrigation_mtd, esc, accent="irrigation", icon=irrigation_icon
-        )
-    }
-    {_metric_tile("Gap", view.deficit, esc, accent="deficit", icon=deficit_icon)}
-  </div>
-
-  <section class="card">
+  <section class="card schedule-card">
     <div class="section-head">
-      <h2>Schedule</h2>
+      <h2>Next check</h2>
       <span>{esc(view.local_time)}</span>
     </div>
-    <ul class="detail-list">
-      {_detail_row("Next check", view.next_check, esc)}
-      {_detail_row("Forecast", view.forecast, esc)}
-      {_detail_row("Next cycle", view.decision_short, esc, highlight=True)}
-    </ul>
+    <p class="next-check-value">{esc(view.next_check)}</p>
     {sewer_html}
     {error_html}
   </section>
