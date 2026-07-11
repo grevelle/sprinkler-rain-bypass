@@ -24,6 +24,24 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      - id: check-dashboard-css
+        name: check dashboard CSS
+        entry: python scripts/check_dashboard_css.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+      - id: check-test-fixtures
+        name: check test fixtures
+        entry: python scripts/check_test_fixtures.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+      - id: check-shell-functions
+        name: check shell functions
+        entry: python scripts/check_shell_functions.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
       - id: vulture-src
         name: vulture src
         entry: python -m vulture src/rain_bypass vulture_whitelist.py --min-confidence 80

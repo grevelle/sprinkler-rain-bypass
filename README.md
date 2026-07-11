@@ -279,7 +279,7 @@ sudo systemctl disable --now apt-daily-upgrade.timer
 
 ```bash
 pip install -e ".[dev,gpio]"
-pre-commit install                        # commit: Ruff + ShellCheck; push: Pyright + pytest
+pre-commit install                        # commit: Ruff + ShellCheck; push: dead-code checks + Pyright + pytest
 
 # Full CI locally (mirrors GitHub Actions):
 ./scripts/ci.sh                           # Linux / macOS / Pi
@@ -627,7 +627,7 @@ Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from b
 
 Typer powers `rain-bypass` and `rain-bypass-install`. The package ships **`py.typed`** (PEP 561) for downstream type checkers. Code targets **Python 3.12+** syntax (PEP 695 aliases, `match`/`case`, `typing.override`); CI and the Pi runtime use the latest **3.x** (3.13 on current Pi OS).
 
-**Quality gate:** pre-commit (Ruff + ShellCheck), Pyright strict, vulture, pytest with **100% branch coverage** (`pytest -m "not live"`). See [Development & CI](#development--ci).
+**Quality gate:** pre-commit (Ruff + ShellCheck on commit; dashboard CSS, fixture, shell, vulture, Pyright, pytest on push), GitHub Actions CI, vulture, pytest with **100% branch coverage** (`pytest -m "not live"`). See [Development & CI](#development--ci).
 
 ## Development
 
