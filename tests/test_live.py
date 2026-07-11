@@ -15,7 +15,13 @@ from rain_bypass import balance
 from rain_bypass.cli import app
 from rain_bypass.config import Settings, State, load_example_settings, local_today, write_settings
 from rain_bypass.logic import decide, safety_allows_watering
-from rain_bypass.weather import fetch_weather, sum_precip, timeline_request_params, timeline_url_for
+from rain_bypass.weather import (
+    TimelineDay,
+    fetch_weather,
+    sum_precip,
+    timeline_request_params,
+    timeline_url_for,
+)
 from rain_bypass.windows import forecast_window, month_start, timeline_window
 
 pytestmark = [
@@ -112,8 +118,9 @@ def test_live_fetch_weather_returns_inches(live_case: LiveCase) -> None:
         params=timeline_request_params(settings),
         timeout=30,
     ).json()
-    expected_mtd = sum_precip(response["days"], mtd_start, today)
-    expected_forecast = sum_precip(response["days"], forecast_start, forecast_end)
+    parsed_days = [TimelineDay.model_validate(day) for day in response["days"]]
+    expected_mtd = sum_precip(parsed_days, mtd_start, today)
+    expected_forecast = sum_precip(parsed_days, forecast_start, forecast_end)
     snapshot = fetch_weather(settings)
     assert snapshot.rain_mtd == pytest.approx(expected_mtd)
     assert snapshot.forecast_inches == pytest.approx(expected_forecast)

@@ -16,6 +16,7 @@ from rain_bypass.deploy import (
     render_autoupdate_timer,
     render_systemd_unit,
 )
+from rain_bypass.prompting import detect_service_user
 
 
 @dataclass
@@ -42,6 +43,37 @@ class FakePrompter:
         if self.secrets:
             return self.secrets.pop(0)
         return "test-key-001"
+
+
+def test_detect_service_user_returns_root_without_pi(monkeypatch):
+    monkeypatch.setattr("rain_bypass.prompting.shutil.which", lambda _name: None)
+    assert detect_service_user() == "root"
+
+
+def test_detect_service_user_returns_pi_when_present(monkeypatch):
+    monkeypatch.setattr(
+        "rain_bypass.prompting.shutil.which", lambda name: "/usr/bin/id" if name == "id" else None
+    )
+
+    def fake_run(cmd, **kwargs):
+        return CompletedProcess(cmd, 0)
+
+    assert detect_service_user(run_command=fake_run) == "pi"
+
+
+def test_detect_service_user_prompts_when_pi_present(monkeypatch):
+    monkeypatch.setattr(
+        "rain_bypass.prompting.shutil.which", lambda name: "/usr/bin/id" if name == "id" else None
+    )
+
+    def fake_run(cmd, **kwargs):
+        return CompletedProcess(cmd, 0)
+
+    prompter = FakePrompter(answers=["root"])
+    assert detect_service_user(run_command=fake_run, prompter=prompter) == "root"
+    assert prompter.text_calls == [
+        ("Service user (needs GPIO access on Pi; root is safest)", "root"),
+    ]
 
 
 def test_render_systemd_unit():

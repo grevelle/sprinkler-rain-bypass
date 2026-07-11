@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
-from typing import Any, cast
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from rain_bypass import config
 from rain_bypass.config import Location, Settings
@@ -26,6 +27,24 @@ VISUAL_CROSSING = (
     "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
 )
 TIMELINE_BASE: dict[str, str] = {"unitGroup": "us"}
+
+
+class TimelineDay(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    datetime: str | None = None
+    precip: float | None = None
+    tempmin: float | None = None
+
+
+class TimelineResponse(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore", populate_by_name=True)
+
+    days: list[TimelineDay] | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    timezone: str | None = None
+    query_cost: int | None = Field(default=None, alias="queryCost")
 
 
 def timeline_params(settings: Settings) -> dict[str, str]:
@@ -54,16 +73,13 @@ def resolve_location(zip_code: str, api_key: str, *, timeout: int = 45) -> Locat
         },
         timeout=timeout,
     )
-    latitude = payload.get("latitude")
-    longitude = payload.get("longitude")
-    timezone = payload.get("timezone")
-    if latitude is None or longitude is None or not timezone:
+    if payload.latitude is None or payload.longitude is None or not payload.timezone:
         raise WeatherError("visual crossing could not resolve zip code")
     return Location(
         zip_code=zip_code,
-        latitude=float(latitude),
-        longitude=float(longitude),
-        timezone=str(timezone),
+        latitude=float(payload.latitude),
+        longitude=float(payload.longitude),
+        timezone=str(payload.timezone),
     )
 
 
@@ -98,7 +114,7 @@ def fetch_weather(settings: Settings, *, now: datetime | None = None) -> Weather
         timeout=timeout,
     )
     _log_timeline_meta(payload, settings)
-    daily = _require_daily_rows(payload.get("days"))
+    daily = _require_daily_rows(payload.days)
 
     today = config.local_today(loc)
     mtd_start = month_start(today)
@@ -155,7 +171,7 @@ def _get_timeline(
     *,
     api_key: str,
     timeout: int,
-) -> dict[str, Any]:
+) -> TimelineResponse:
     return _get_json(
         timeline_url_for(settings, start, end),
         params={**timeline_params(settings), "key": api_key},
@@ -163,13 +179,25 @@ def _get_timeline(
     )
 
 
-def _require_daily_rows(raw: object) -> list[Mapping[str, Any]]:
-    if not isinstance(raw, list):
+def _require_daily_rows(raw: object) -> list[TimelineDay]:
+    if raw is None or not isinstance(raw, list):
         raise WeatherError("visual crossing response missing daily data")
-    return cast(list[Mapping[str, Any]], raw)
+    days: list[TimelineDay] = []
+    for item in cast(list[object], raw):
+        if isinstance(item, TimelineDay):
+            days.append(item)
+            continue
+        if isinstance(item, dict):
+            try:
+                days.append(TimelineDay.model_validate(item))
+            except ValidationError as exc:
+                raise WeatherError("visual crossing returned invalid JSON") from exc
+            continue
+        raise WeatherError("visual crossing returned invalid JSON")
+    return days
 
 
-def _get_json(url: str, *, params: dict[str, str], timeout: int) -> dict[str, Any]:
+def _get_json(url: str, *, params: dict[str, str], timeout: int) -> TimelineResponse:
     try:
         response = httpx.get(url, params=params, timeout=timeout)
         response.raise_for_status()
@@ -191,15 +219,17 @@ def _get_json(url: str, *, params: dict[str, str], timeout: int) -> dict[str, An
         raise WeatherError("visual crossing returned invalid JSON") from exc
     if not isinstance(payload, dict):
         raise WeatherError("visual crossing returned invalid JSON")
-    return cast(dict[str, Any], payload)
+    try:
+        return TimelineResponse.model_validate(payload)
+    except ValidationError as exc:
+        raise WeatherError("visual crossing returned invalid JSON") from exc
 
 
-def _log_timeline_meta(payload: dict[str, Any], settings: Settings) -> None:
-    query_cost = payload.get("queryCost")
-    if query_cost is not None:
-        logger.debug("visual_crossing queryCost=%s", query_cost)
+def _log_timeline_meta(payload: TimelineResponse, settings: Settings) -> None:
+    if payload.query_cost is not None:
+        logger.debug("visual_crossing queryCost=%s", payload.query_cost)
 
-    api_tz = payload.get("timezone")
+    api_tz = payload.timezone
     config_tz = settings.location.timezone
     if api_tz and api_tz != config_tz:
         logger.warning(
@@ -220,24 +250,24 @@ def parse_vc_datetime(raw: str, timezone: str) -> datetime:
     return parsed.astimezone(tz)
 
 
-def freeze_block_for_days(daily: list[Mapping[str, Any]], settings: Settings, today: date) -> bool:
+def freeze_block_for_days(daily: Sequence[TimelineDay], settings: Settings, today: date) -> bool:
     threshold = settings.watering.freeze_temp_f
     watch = {today.isoformat(), (today + timedelta(days=1)).isoformat()}
     for day in daily:
-        raw = day.get("datetime")
+        raw = day.datetime
         if not raw:
             continue
         day_s = str(raw)[:10]
         if day_s not in watch:
             continue
-        tempmin = day.get("tempmin")
+        tempmin = day.tempmin
         if tempmin is not None and float(tempmin) < threshold:
             return True
     return False
 
 
 def daily_precip_values(
-    days: list[Mapping[str, Any]], start: date, end: date, *, strict: bool = True
+    days: Sequence[TimelineDay], start: date, end: date, *, strict: bool = True
 ) -> list[float]:
     if not days:
         raise WeatherError("visual crossing returned no daily rows")
@@ -245,23 +275,23 @@ def daily_precip_values(
     start_s, end_s = start.isoformat(), end.isoformat()
     values: list[float] = []
     for day in days:
-        raw = day.get("datetime")
+        raw = day.datetime
         if not raw:
             if strict:
                 raise WeatherError("visual crossing day missing datetime")
             continue
         day_s = str(raw)[:10]
         if start_s <= day_s <= end_s:
-            values.append(float(day.get("precip") or 0))
+            values.append(float(day.precip or 0))
     return values
 
 
-def max_daily_precip(days: list[Mapping[str, Any]], start: date, end: date) -> float:
+def max_daily_precip(days: Sequence[TimelineDay], start: date, end: date) -> float:
     values = daily_precip_values(days, start, end, strict=False)
     return max(values) if values else 0.0
 
 
-def sum_precip(days: list[Mapping[str, Any]], start: date, end: date) -> float:
+def sum_precip(days: Sequence[TimelineDay], start: date, end: date) -> float:
     values = daily_precip_values(days, start, end)
     expected = (end - start).days + 1
     if len(values) != expected:

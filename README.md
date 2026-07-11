@@ -243,6 +243,10 @@ pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100
 pre-commit run --all-files
 ```
 
+Ruff enables `E`, `F`, `I`, `UP`, `B`, `SIM`, and `RUF`. Dependencies and GitHub Actions refs stay **unpinned** (latest on each install/CI run).
+
+Shared test helpers live in `tests/conftest.py` (`weather_snapshot`, `timeline_day`, `patch_local_today`).
+
 Live weather smoke test (needs real `settings.toml` with API key):
 
 ```bash
@@ -360,13 +364,29 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and migration notes (e.g. v
 
 ## Code
 
-Layered modules: `paths`, `config`, `balance`, `windows`, `weather` (httpx), `logic` (`preview`, `evaluate_weather`), `controller`, `gpio`, `status`, `cli`, `install_cli`, and `deploy`. Typer powers both `rain-bypass` and `rain-bypass-install`. `settings.example.toml` is the single source for defaults. CI runs pre-commit, Pyright (strict), and pytest at 100% coverage on the latest Python 3.x.
+Layered Python package under `src/rain_bypass/`:
+
+| Layer | Modules |
+| ----- | ------- |
+| **Core** | `paths`, `config`, `models`, `balance`, `windows`, `weather`, `logic`, `controller`, `gpio`, `status`, `cli` |
+| **Installer** | `install_cli` (Typer app), `install_flow`, `install_prompts`, `prompting` |
+| **Deploy** | `deploy` (systemd unit + auto-update timer) |
+| **Support** | `platform`, `logging_setup`, `exceptions` |
+
+- **`weather`** — Visual Crossing Timeline API via httpx; responses validated as Pydantic `TimelineDay` / `TimelineResponse` before balance math.
+- **`logic`** — `preview()` / `decide()` and `evaluate_weather()`; shared `Evaluation` / `Preview` types in `models`.
+- **`install_cli`** — thin entry point only; prompts live in `install_prompts`, install/configure flow in `install_flow`, shared Typer prompters in `prompting` (also used by `deploy`).
+- **`settings.example.toml`** — canonical defaults for install, tests, and `rain_bypass.config`.
+
+Typer powers `rain-bypass` and `rain-bypass-install`. The package ships **`py.typed`** (PEP 561) for downstream type checkers. Code targets **Python 3.12+** syntax (PEP 695 aliases, `match`/`case`, `typing.override`); CI and the Pi runtime use the latest **3.x** (3.13 on current Pi OS).
+
+**Quality gate:** pre-commit (Ruff + ShellCheck), Pyright strict, pytest with **100% branch coverage** (`pytest -m "not live"`). See [Development & CI](#development--ci).
 
 ## Development
 
 Dependencies are **unpinned** — every install uses `pip install --upgrade` for the latest releases. See [Development & CI](#development--ci) in the command reference for install, hooks, and local CI commands.
 
-`.gitattributes`, `.editorconfig`, and `.vscode/settings.json` keep **LF** line endings on all platforms (required for Pi and Linux CI). Install the **EditorConfig** extension if Cursor prompts you.
+The repo uses **LF** line endings everywhere (`.gitattributes`, `.editorconfig`, `.vscode/settings.json`) so shell scripts and the Pi stay in sync. Install the **EditorConfig** extension if Cursor prompts you.
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 

@@ -5,7 +5,7 @@ import logging
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from types import ModuleType
-from typing import Protocol
+from typing import Protocol, override
 
 from rain_bypass.config import Gpio
 
@@ -16,10 +16,11 @@ class PinDriver(Protocol):
     def apply(self, watering_required: bool) -> None: ...
 
 
-PinFactory = Callable[[Gpio], AbstractContextManager[PinDriver]]
+type PinFactory = Callable[[Gpio], AbstractContextManager[PinDriver]]
 
 
-class MockPins:
+class MockPins(PinDriver):
+    @override
     def apply(self, watering_required: bool) -> None:
         logger.info("mock gpio watering %s", "enabled" if watering_required else "disabled")
 
@@ -28,7 +29,7 @@ def _import_gpiozero() -> ModuleType:
     return importlib.import_module("gpiozero")
 
 
-class PiPins:
+class PiPins(PinDriver):
     def __init__(self, gpio: Gpio) -> None:
         output_device = _import_gpiozero().OutputDevice
         self._relay = output_device(gpio.relay, initial_value=True)
@@ -37,6 +38,7 @@ class PiPins:
         # Fail-safe before the first weather fetch (Pi boot can take seconds on slow Wi-Fi).
         self.apply(False)
 
+    @override
     def apply(self, watering_required: bool) -> None:
         if watering_required:
             self._relay.off()

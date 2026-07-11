@@ -12,27 +12,33 @@ from typer.testing import CliRunner
 from rain_bypass.config import Location, load_example_settings, load_settings, write_settings
 from rain_bypass.deploy import SERVICE_NAME
 from rain_bypass.exceptions import WeatherError
-from rain_bypass.install_cli import (
-    PromptDefaults,
-    TyperPrompter,
-    app,
-    build_settings,
+from rain_bypass.install_cli import app, main
+from rain_bypass.install_flow import (
     ensure_state_writable,
-    load_prompt_defaults,
-    load_settings_base,
-    main,
-    prompt_defaults_from,
-    prompt_settings,
-    prompt_watering_profile,
     resolve_state_path,
     restart_service_if_installed,
     run_api_test,
     run_configure,
     run_install,
-    validate_api_key,
     write_and_validate_settings,
 )
+from rain_bypass.install_prompts import (
+    PromptDefaults,
+    build_settings,
+    load_prompt_defaults,
+    load_settings_base,
+    prompt_defaults_from,
+    prompt_settings,
+    prompt_watering_profile,
+    validate_api_key,
+)
 from rain_bypass.paths import repo_root
+from rain_bypass.prompting import TyperPrompter
+
+
+def _patch_pi(monkeypatch: pytest.MonkeyPatch, *, pi: bool) -> None:
+    monkeypatch.setattr("rain_bypass.install_prompts.is_raspberry_pi", lambda: pi)
+    monkeypatch.setattr("rain_bypass.install_flow.is_raspberry_pi", lambda: pi)
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +51,7 @@ def _stub_resolve_location(monkeypatch):
             timezone="America/Chicago",
         )
 
-    monkeypatch.setattr("rain_bypass.install_cli.resolve_location", fake_resolve)
+    monkeypatch.setattr("rain_bypass.install_prompts.resolve_location", fake_resolve)
 
 
 @dataclass
@@ -84,7 +90,7 @@ def test_write_and_validate_settings(tmp_path: Path):
 def test_run_api_test_success(tmp_path: Path, monkeypatch):
     path = tmp_path / "settings.toml"
     write_settings(path, load_example_settings(weather={"api_key": "smoke-key01"}))
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
     run_api_test(path)
 
 
@@ -93,22 +99,22 @@ def test_run_api_test_failure(tmp_path: Path, monkeypatch):
     write_settings(path, load_example_settings(weather={"api_key": "smoke-key01"}))
 
     def _boom(_settings):
-        raise RuntimeError("api down")
+        raise WeatherError("api down")
 
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", _boom)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", _boom)
     with pytest.raises(typer.Exit) as exc:
         run_api_test(path)
     assert exc.value.exit_code == 1
 
 
 def test_restart_service_if_installed_skips_without_systemctl(monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.shutil.which", lambda _name: None)
+    monkeypatch.setattr("rain_bypass.install_flow.shutil.which", lambda _name: None)
     restart_service_if_installed()
 
 
 def test_restart_service_if_installed_skips_without_unit(monkeypatch):
     monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
+        "rain_bypass.install_flow.shutil.which",
         lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
     )
     restart_service_if_installed()
@@ -122,7 +128,7 @@ def test_restart_service_if_installed_restarts(monkeypatch):
         return CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
+        "rain_bypass.install_flow.shutil.which",
         lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
     )
     unit = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
@@ -149,7 +155,7 @@ def test_restart_service_if_installed_declined(monkeypatch):
         return CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
+        "rain_bypass.install_flow.shutil.which",
         lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
     )
     unit = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
@@ -169,10 +175,10 @@ def test_restart_service_if_installed_declined(monkeypatch):
 
 
 def test_run_configure_preserves_other_sections(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    _patch_pi(monkeypatch, pi=True)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
     monkeypatch.setattr(
-        "rain_bypass.install_cli.restart_service_if_installed",
+        "rain_bypass.install_flow.restart_service_if_installed",
         lambda **_kwargs: None,
     )
     settings_path = tmp_path / "settings.toml"
@@ -194,10 +200,10 @@ def test_run_configure_preserves_other_sections(tmp_path: Path, monkeypatch):
 
 
 def test_run_configure_writes_settings(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    _patch_pi(monkeypatch, pi=True)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
     monkeypatch.setattr(
-        "rain_bypass.install_cli.restart_service_if_installed",
+        "rain_bypass.install_flow.restart_service_if_installed",
         lambda **_kwargs: None,
     )
     prompter = FakePrompter(secrets=["live-key-001"])
@@ -207,10 +213,10 @@ def test_run_configure_writes_settings(tmp_path: Path, monkeypatch):
 
 
 def test_run_configure_keeps_existing_key(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    _patch_pi(monkeypatch, pi=True)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
     monkeypatch.setattr(
-        "rain_bypass.install_cli.restart_service_if_installed",
+        "rain_bypass.install_flow.restart_service_if_installed",
         lambda **_kwargs: None,
     )
     settings_path = tmp_path / "settings.toml"
@@ -224,14 +230,14 @@ def test_run_configure_keeps_existing_key(tmp_path: Path, monkeypatch):
 
 
 def test_run_configure_skips_api_test(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
 
     def _boom(_settings):
         raise RuntimeError("should not run")
 
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", _boom)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", _boom)
     monkeypatch.setattr(
-        "rain_bypass.install_cli.restart_service_if_installed",
+        "rain_bypass.install_flow.restart_service_if_installed",
         lambda **_kwargs: None,
     )
     prompter = FakePrompter(secrets=["live-key-001"])
@@ -251,7 +257,7 @@ def test_restart_service_if_installed_skip_flag(monkeypatch):
         return CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
+        "rain_bypass.install_flow.shutil.which",
         lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
     )
     restart_service_if_installed(run_command=fake_run, skip=True)
@@ -281,7 +287,7 @@ def test_validate_api_key():
 
 
 def test_parse_zip_code():
-    from rain_bypass.install_cli import parse_zip_code
+    from rain_bypass.install_prompts import parse_zip_code
 
     assert parse_zip_code("53029") == "53029"
     assert parse_zip_code(" 53029-1234 ") == "53029"
@@ -290,7 +296,7 @@ def test_parse_zip_code():
 
 
 def test_parse_inches_per_cycle():
-    from rain_bypass.install_cli import parse_inches_per_cycle
+    from rain_bypass.install_prompts import parse_inches_per_cycle
 
     assert parse_inches_per_cycle("0.3") == pytest.approx(0.3)
     with pytest.raises(typer.BadParameter):
@@ -298,7 +304,7 @@ def test_parse_inches_per_cycle():
 
 
 def test_parse_check_time():
-    from rain_bypass.install_cli import parse_check_time
+    from rain_bypass.install_prompts import parse_check_time
 
     assert parse_check_time("04:30") == (4, 30)
     with pytest.raises(typer.BadParameter, match="HH:MM"):
@@ -361,13 +367,13 @@ def test_resolve_state_path_absolute(tmp_path: Path):
 
 
 def test_ensure_state_writable_noop_when_missing(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_flow._is_posix", lambda: True)
     settings = load_example_settings(weather={"api_key": "k"})
     ensure_state_writable(tmp_path, settings, run_command=pytest.fail)
 
 
 def test_ensure_state_writable_noop_on_non_posix(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: False)
+    monkeypatch.setattr("rain_bypass.install_flow._is_posix", lambda: False)
     settings = load_example_settings(weather={"api_key": "k"})
     state_path = tmp_path / "state.json"
     state_path.write_text("{}", encoding="utf-8")
@@ -375,9 +381,9 @@ def test_ensure_state_writable_noop_on_non_posix(tmp_path: Path, monkeypatch):
 
 
 def test_ensure_state_writable_chowns_when_unwritable(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_flow._is_posix", lambda: True)
     monkeypatch.setattr(
-        "rain_bypass.install_cli.shutil.which",
+        "rain_bypass.install_flow.shutil.which",
         lambda name: "/usr/bin/sudo" if name == "sudo" else None,
     )
     settings = load_example_settings(weather={"api_key": "k"})
@@ -403,8 +409,8 @@ def test_ensure_state_writable_chowns_when_unwritable(tmp_path: Path, monkeypatc
 
 
 def test_ensure_state_writable_exits_without_sudo(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli._is_posix", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.shutil.which", lambda _name: None)
+    monkeypatch.setattr("rain_bypass.install_flow._is_posix", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_flow.shutil.which", lambda _name: None)
     settings = load_example_settings(weather={"api_key": "k"})
     state_path = tmp_path / "state.json"
     state_path.write_text("{}", encoding="utf-8")
@@ -418,7 +424,7 @@ def test_ensure_state_writable_exits_without_sudo(tmp_path: Path, monkeypatch):
 
 
 def test_prompt_settings_builds_toml(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
     prompter = FakePrompter(secrets=["prompted-key1"])
     settings = prompt_settings(
         load_example_settings(), prompter, defaults=prompt_defaults_from(load_example_settings())
@@ -449,7 +455,7 @@ def test_prompt_watering_profile_custom_values():
 
 
 def test_build_settings_preserves_base_sections(monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
     base = load_example_settings(sewer={"start_day": 20})
     settings = build_settings(
         "my-test-key1",
@@ -465,7 +471,7 @@ def test_build_settings_preserves_base_sections(monkeypatch):
 
 
 def test_prompt_settings_retries_on_bad_api_key(monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
 
     def fake_resolve(_zip_code: str, api_key: str, **_kwargs) -> Location:
         if api_key == "bad-key-001":
@@ -477,7 +483,7 @@ def test_prompt_settings_retries_on_bad_api_key(monkeypatch):
             timezone="America/Chicago",
         )
 
-    monkeypatch.setattr("rain_bypass.install_cli.resolve_location", fake_resolve)
+    monkeypatch.setattr("rain_bypass.install_prompts.resolve_location", fake_resolve)
     prompter = FakePrompter(secrets=["bad-key-001", "good-key-001"])
     settings = prompt_settings(
         load_example_settings(), prompter, defaults=prompt_defaults_from(load_example_settings())
@@ -486,7 +492,7 @@ def test_prompt_settings_retries_on_bad_api_key(monkeypatch):
 
 
 def test_prompt_settings_keeps_existing_api_key(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
     existing = load_example_settings(weather={"api_key": "existing-key1"})
     prompter = FakePrompter(confirms=[True])
     settings = prompt_settings(
@@ -500,8 +506,8 @@ def test_prompt_settings_keeps_existing_api_key(tmp_path, monkeypatch):
 
 
 def test_run_install_keeps_existing_api_key(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    _patch_pi(monkeypatch, pi=True)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
     settings_path = tmp_path / "settings.toml"
     write_settings(
         settings_path,
@@ -518,7 +524,7 @@ def test_run_install_keeps_existing_api_key(tmp_path, monkeypatch):
 
 
 def test_build_settings_uses_example_defaults(monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
     settings = build_settings(
         "my-test-key1",
         "53029",
@@ -535,7 +541,7 @@ def test_build_settings_uses_example_defaults(monkeypatch):
 
 
 def test_build_settings_mock_gpio_off_pi(monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: False)
+    _patch_pi(monkeypatch, pi=False)
     settings = build_settings(
         "my-test-key1", "53029", base=None, inches_per_cycle=0.3, check_hour=0, check_minute=0
     )
@@ -543,12 +549,12 @@ def test_build_settings_mock_gpio_off_pi(monkeypatch):
 
 
 def test_build_settings_maps_weather_error(monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
 
     def _fail(*_args, **_kwargs):
         raise WeatherError("visual crossing unauthorized; check api_key")
 
-    monkeypatch.setattr("rain_bypass.install_cli.resolve_location", _fail)
+    monkeypatch.setattr("rain_bypass.install_prompts.resolve_location", _fail)
     with pytest.raises(typer.BadParameter, match="unauthorized"):
         build_settings(
             "my-test-key1", "53029", base=None, inches_per_cycle=0.3, check_hour=0, check_minute=0
@@ -561,7 +567,7 @@ def test_build_settings_rejects_empty_api_key():
 
 
 def test_run_install_skip_api_test(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
     prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False, False])
     run_install(
         tmp_path,
@@ -573,8 +579,8 @@ def test_run_install_skip_api_test(tmp_path, monkeypatch):
 
 
 def test_run_install_pi_zero_notice(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr("rain_bypass.install_cli.is_pi_zero", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    monkeypatch.setattr("rain_bypass.install_flow.is_pi_zero", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
     prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False, False])
     run_install(
         tmp_path,
@@ -587,16 +593,16 @@ def test_run_install_pi_zero_notice(tmp_path, monkeypatch, capsys):
 
 
 def test_run_install_runs_once_successfully(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
-    monkeypatch.setattr("rain_bypass.install_cli.run", lambda *_args, **_kwargs: None)
+    _patch_pi(monkeypatch, pi=True)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
+    monkeypatch.setattr("rain_bypass.install_flow.run", lambda *_args, **_kwargs: None)
     prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, True, False])
     run_install(tmp_path, prompter=prompter, skip_systemd=True)
 
 
 def test_run_install_shows_service_status(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    _patch_pi(monkeypatch, pi=True)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
     unit = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
     original_is_file = Path.is_file
 
@@ -616,15 +622,15 @@ def test_run_install_shows_service_status(tmp_path, monkeypatch):
 
 
 def test_run_install_invokes_systemd(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    _patch_pi(monkeypatch, pi=True)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
     invoked: list[bool] = []
     monkeypatch.setattr(
-        "rain_bypass.install_cli.install_systemd_unit",
+        "rain_bypass.install_flow.install_systemd_unit",
         lambda *args, **kwargs: invoked.append(True),
     )
     monkeypatch.setattr(
-        "rain_bypass.install_cli.install_autoupdate",
+        "rain_bypass.install_flow.install_autoupdate",
         lambda *args, **kwargs: None,
     )
     prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False])
@@ -633,15 +639,15 @@ def test_run_install_invokes_systemd(tmp_path, monkeypatch):
 
 
 def test_run_install_invokes_autoupdate_on_pi(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    _patch_pi(monkeypatch, pi=True)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
     invoked: list[bool] = []
     monkeypatch.setattr(
-        "rain_bypass.install_cli.install_systemd_unit",
+        "rain_bypass.install_flow.install_systemd_unit",
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
-        "rain_bypass.install_cli.install_autoupdate",
+        "rain_bypass.install_flow.install_autoupdate",
         lambda *args, **kwargs: invoked.append(True),
     )
     prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False])
@@ -650,9 +656,9 @@ def test_run_install_invokes_autoupdate_on_pi(tmp_path, monkeypatch):
 
 
 def test_run_install_writes_settings(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
     monkeypatch.setattr(
-        "rain_bypass.install_cli.weather_api_smoke",
+        "rain_bypass.install_flow.weather_api_smoke",
         lambda _settings: "API OK",
     )
     prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False, False])
@@ -683,12 +689,12 @@ def test_run_install_aborts_on_existing_settings(tmp_path):
 
 
 def test_run_install_api_failure(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
+    _patch_pi(monkeypatch, pi=True)
 
     def _boom(_settings):
-        raise RuntimeError("api down")
+        raise WeatherError("api down")
 
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", _boom)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", _boom)
     prompter = FakePrompter(secrets=["valid-key01"], confirms=[True])
     with pytest.raises(typer.Exit) as exc:
         run_install(tmp_path, prompter=prompter, skip_systemd=True, skip_once=True)
@@ -696,13 +702,13 @@ def test_run_install_api_failure(tmp_path, monkeypatch):
 
 
 def test_run_install_once_failure(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: True)
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    _patch_pi(monkeypatch, pi=True)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
 
     def _fail(*_args, **_kwargs):
         raise RuntimeError("cycle failed")
 
-    monkeypatch.setattr("rain_bypass.install_cli.run", _fail)
+    monkeypatch.setattr("rain_bypass.install_flow.run", _fail)
     prompter = FakePrompter(secrets=["valid-key01"], confirms=[True, True, False])
     with pytest.raises(typer.Exit) as exc:
         run_install(tmp_path, prompter=prompter, skip_systemd=True)
@@ -769,8 +775,8 @@ def test_cli_keyboard_interrupt(monkeypatch):
 
 
 def test_typer_prompter_delegates(monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.typer.prompt", lambda label, **kwargs: "value")
-    monkeypatch.setattr("rain_bypass.install_cli.typer.confirm", lambda label, **kwargs: True)
+    monkeypatch.setattr("rain_bypass.prompting.typer.prompt", lambda label, **kwargs: "value")
+    monkeypatch.setattr("rain_bypass.prompting.typer.confirm", lambda label, **kwargs: True)
     prompter = TyperPrompter()
     assert prompter.text("label", default="d") == "value"
     assert prompter.secret("label") == "value"
@@ -790,16 +796,16 @@ def test_cli_setup_autoupdate(monkeypatch):
 
 
 def test_run_install_skips_autoupdate_off_pi(tmp_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.install_cli.is_raspberry_pi", lambda: False)
-    monkeypatch.setattr("rain_bypass.install_cli.weather_api_smoke", lambda _s: "API OK")
+    _patch_pi(monkeypatch, pi=False)
+    monkeypatch.setattr("rain_bypass.install_flow.weather_api_smoke", lambda _s: "API OK")
     systemd_calls: list[bool] = []
     autoupdate_calls: list[bool] = []
     monkeypatch.setattr(
-        "rain_bypass.install_cli.install_systemd_unit",
+        "rain_bypass.install_flow.install_systemd_unit",
         lambda *args, **kwargs: systemd_calls.append(True),
     )
     monkeypatch.setattr(
-        "rain_bypass.install_cli.install_autoupdate",
+        "rain_bypass.install_flow.install_autoupdate",
         lambda *args, **kwargs: autoupdate_calls.append(True),
     )
     prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False])

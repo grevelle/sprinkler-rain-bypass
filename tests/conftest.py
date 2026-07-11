@@ -1,16 +1,37 @@
 import sys
+from datetime import date
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 from rain_bypass.config import Gpio, load_example_settings, load_settings, write_settings
+from rain_bypass.models import WeatherSnapshot
+from rain_bypass.weather import TimelineDay
 
 TEST_SETTINGS_OVERRIDES = {
     "weather": {"api_key": "test-key"},
     "gpio": {"mock": True},
     "runtime": {"weather_timeout_seconds": 15},
 }
+
+
+def weather_snapshot(
+    rain_mtd: float = 0.0,
+    forecast: float = 0.0,
+    max_daily: float = 0.0,
+    freeze_block: bool = False,
+) -> WeatherSnapshot:
+    return WeatherSnapshot(rain_mtd, forecast, max_daily, freeze_block)
+
+
+def timeline_day(**fields: object) -> TimelineDay:
+    return TimelineDay.model_validate(fields)
+
+
+def patch_local_today(monkeypatch: pytest.MonkeyPatch, fixed: date) -> date:
+    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: fixed)
+    return fixed
 
 
 @pytest.fixture

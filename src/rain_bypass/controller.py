@@ -7,29 +7,40 @@ from collections.abc import Callable
 from rain_bypass.config import Settings, State
 from rain_bypass.gpio import PinFactory, watering_pins
 from rain_bypass.logic import decide
+from rain_bypass.models import Decision, Evaluation
 
 logger = logging.getLogger(__name__)
+
+
+def _weather_fields(
+    decision: Decision,
+    state: State,
+) -> tuple[float | None, float | None, float | None, bool | None]:
+    match decision.evaluation:
+        case Evaluation() as evaluation:
+            return (
+                evaluation.rain_mtd,
+                evaluation.forecast_inches,
+                evaluation.max_daily_inches,
+                evaluation.freeze_block,
+            )
+        case _ if decision.error is not None:
+            return (
+                state.rainfall_inches,
+                state.forecast_inches,
+                state.max_daily_inches,
+                state.freeze_block,
+            )
+        case _:
+            return None, None, None, None
 
 
 def tick(settings: Settings, state: State, apply: Callable[[bool], None]) -> State:
     decision = decide(settings, state)
     apply(decision.watering_required)
-    evaluation = decision.evaluation
-    if evaluation is not None:
-        rainfall_inches = evaluation.rain_mtd
-        forecast_inches = evaluation.forecast_inches
-        max_daily_inches = evaluation.max_daily_inches
-        freeze_block = evaluation.freeze_block
-    elif decision.error is not None:
-        rainfall_inches = state.rainfall_inches
-        forecast_inches = state.forecast_inches
-        max_daily_inches = state.max_daily_inches
-        freeze_block = state.freeze_block
-    else:
-        rainfall_inches = None
-        forecast_inches = None
-        max_daily_inches = None
-        freeze_block = None
+    rainfall_inches, forecast_inches, max_daily_inches, freeze_block = _weather_fields(
+        decision, state
+    )
     updated = state.model_copy(
         update={
             "last_weather_update": time.time(),

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Daily auto-update** (`scripts/auto-update.sh`) now runs `apt update` and `apt dist-upgrade` before the application update, matching a manual full OS upgrade.
 - GPIO backend migrated from `RPi.GPIO` to GPIO Zero + lgpio; behavior and pin config unchanged.
+- Internal typing/syntax modernization: Pydantic `TimelineDay`/`TimelineResponse` models in `weather.py`, PEP 695 type aliases, `typing.override`, strategic `match`/`case`, Ruff `SIM`/`RUF` rules. No user-facing behavior change.
+- Internal DRY refactor: shared `prompting.py` for deploy/install prompts, `_build_preview()` in `logic.py`, `py.typed` marker, centralized test helpers in `conftest.py`, installer split into `install_prompts.py` / `install_flow.py` / thin `install_cli.py`. No user-facing behavior change.
 - Internal refactor: `Evaluation`/`Preview` types and `preview()` API consolidate watering decisions; `settings_io` merged into `config`; deploy plumbing extracted to `deploy.py`; installer defaults derived from `settings.example.toml`. No user-facing behavior change.
 
 ### Removed

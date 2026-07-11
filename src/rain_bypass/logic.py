@@ -16,9 +16,7 @@ def safety_allows_watering(snapshot: WeatherSnapshot, settings: Settings) -> boo
     if snapshot.freeze_block:
         return False
     w = settings.watering
-    if w.event_inches > 0 and snapshot.max_daily_inches >= w.event_inches:
-        return False
-    return True
+    return not (w.event_inches > 0 and snapshot.max_daily_inches >= w.event_inches)
 
 
 def evaluate_weather(
@@ -74,40 +72,46 @@ def _safety_fields_saved(state: State) -> bool:
     return state.max_daily_inches is not None and state.freeze_block is not None
 
 
+def _build_preview(
+    effective_state: State,
+    *,
+    sewer_lockout: bool = False,
+    live: WeatherSnapshot | None = None,
+    live_error: str | None = None,
+    evaluation: Evaluation | None = None,
+    cached_verdict: bool | None = None,
+    from_saved_weather: bool = False,
+    safety_known: bool = True,
+) -> Preview:
+    return Preview(
+        effective_state=effective_state,
+        sewer_lockout=sewer_lockout,
+        live=live,
+        live_error=live_error,
+        evaluation=evaluation,
+        cached_verdict=cached_verdict,
+        from_saved_weather=from_saved_weather,
+        safety_known=safety_known,
+    )
+
+
 def preview(settings: Settings, state: State, *, fetch_live: bool = True) -> Preview:
     today = config.local_today(settings.location)
     sewer = in_sewer_lockout(settings.sewer, today)
     effective = balance.ensure_balance_month(state, today)
 
     if sewer:
-        return Preview(
-            effective_state=effective,
-            sewer_lockout=True,
-            live=None,
-            live_error=None,
-            evaluation=None,
-            cached_verdict=None,
-        )
+        return _build_preview(effective, sewer_lockout=True)
 
     if not fetch_live:
         cached = state.watering_required if state.watering_required is not None else None
         saved = _snapshot_from_state(effective)
         if saved is None:
-            return Preview(
-                effective_state=effective,
-                sewer_lockout=False,
-                live=None,
-                live_error=None,
-                evaluation=None,
-                cached_verdict=cached,
-            )
+            return _build_preview(effective, cached_verdict=cached)
         safety_known = _safety_fields_saved(state)
         evaluation = evaluate_weather(settings, saved, effective.irrigation_inches_mtd, today)
-        return Preview(
-            effective_state=effective,
-            sewer_lockout=False,
-            live=None,
-            live_error=None,
+        return _build_preview(
+            effective,
             evaluation=evaluation,
             cached_verdict=cached,
             from_saved_weather=True,
@@ -117,24 +121,10 @@ def preview(settings: Settings, state: State, *, fetch_live: bool = True) -> Pre
     try:
         live = fetch_weather(settings)
     except WeatherError as exc:
-        return Preview(
-            effective_state=effective,
-            sewer_lockout=False,
-            live=None,
-            live_error=str(exc),
-            evaluation=None,
-            cached_verdict=None,
-        )
+        return _build_preview(effective, live_error=str(exc))
 
     evaluation = evaluate_weather(settings, live, effective.irrigation_inches_mtd, today)
-    return Preview(
-        effective_state=effective,
-        sewer_lockout=False,
-        live=live,
-        live_error=None,
-        evaluation=evaluation,
-        cached_verdict=None,
-    )
+    return _build_preview(effective, live=live, evaluation=evaluation)
 
 
 def decide(settings: Settings, state: State) -> Decision:

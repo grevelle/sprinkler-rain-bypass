@@ -3,25 +3,16 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
 
 import typer
 
 from rain_bypass.paths import repo_root
-
-RunCommand = Callable[..., subprocess.CompletedProcess[bytes]]
+from rain_bypass.prompting import Prompter, RunCommand, detect_service_user
 
 SERVICE_NAME = "rain-bypass"
 AUTO_UPDATE_SERVICE_NAME = "rain-bypass-auto-update"
 DEPLOY_DIR = repo_root() / "deploy"
-
-
-class Prompter(Protocol):
-    def text(self, label: str, *, default: str = "") -> str: ...
-
-    def confirm(self, label: str, *, default: bool = False) -> bool: ...
 
 
 def _render_template(filename: str, replacements: dict[str, str]) -> str:
@@ -135,9 +126,7 @@ def install_autoupdate(
 
     install_unattended_upgrades(run_command=runner)
 
-    service_user = "root"
-    if shutil.which("id") and runner(["id", "-u", "pi"], check=False).returncode == 0:
-        service_user = "pi"
+    service_user = detect_service_user(run_command=runner)
 
     service_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.service")
     timer_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.timer")
@@ -179,12 +168,7 @@ def install_systemd_unit(
     if not prompter.confirm(f"Install and enable systemd service ({SERVICE_NAME})?", default=True):
         return
 
-    service_user = "root"
-    if shutil.which("id") and runner(["id", "-u", "pi"], check=False).returncode == 0:
-        service_user = prompter.text(
-            "Service user (needs GPIO access on Pi; root is safest)",
-            default="root",
-        )
+    service_user = detect_service_user(run_command=runner, prompter=prompter)
 
     unit_path = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
     typer.echo(f"==> Installing {unit_path} (requires sudo)")

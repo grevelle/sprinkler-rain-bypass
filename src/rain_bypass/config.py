@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import tomli_w
@@ -15,8 +15,6 @@ import tomllib
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from rain_bypass.paths import repo_root
-
-M = TypeVar("M", bound=BaseModel)
 
 EXAMPLE_SETTINGS_PATH = repo_root() / "settings.example.toml"
 
@@ -202,7 +200,7 @@ def load_settings(config_path: Path | str) -> Settings:
         raise ConfigError(str(exc)) from exc
 
 
-def validate_model(model: type[M], data: object) -> M:
+def validate_model[M: BaseModel](model: type[M], data: object) -> M:
     try:
         return model.model_validate(data)
     except ValidationError as exc:

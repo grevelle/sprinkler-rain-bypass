@@ -40,15 +40,17 @@ class Preview:
 
     @property
     def would_water(self) -> bool | None:
-        if self.sewer_lockout:
-            return False
-        if self.evaluation is not None:
-            if not self.safety_known:
-                if not self.evaluation.balance_ok:
+        match (self.sewer_lockout, self.evaluation, self.safety_known):
+            case (True, _, _):
+                return False
+            case (_, evaluation, False) if evaluation is not None:
+                if not evaluation.balance_ok:
                     return False
                 return None
-            return self.evaluation.watering_required
-        return self.cached_verdict
+            case (_, evaluation, _) if evaluation is not None:
+                return evaluation.watering_required
+            case _:
+                return self.cached_verdict
 
 
 @dataclass(frozen=True, slots=True)

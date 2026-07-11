@@ -6,11 +6,12 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from conftest import patch_local_today, weather_snapshot
 from typer.testing import CliRunner
 
 from rain_bypass.cli import app
 from rain_bypass.config import ConfigError, State
-from rain_bypass.models import Evaluation, WeatherSnapshot
+from rain_bypass.models import Evaluation
 from rain_bypass.status import (
     format_deficit_formula,
     format_duration,
@@ -24,15 +25,6 @@ from rain_bypass.status import (
     relay_label,
     relay_mismatch_note,
 )
-
-
-def _snapshot(
-    rain_mtd: float = 0.0,
-    forecast: float = 0.0,
-    max_daily: float = 0.0,
-    freeze_block: bool = False,
-) -> WeatherSnapshot:
-    return WeatherSnapshot(rain_mtd, forecast, max_daily, freeze_block)
 
 
 def _evaluation(**overrides: object) -> Evaluation:
@@ -135,17 +127,17 @@ def test_relay_mismatch_note() -> None:
 
 
 def test_gather_status_sewer_lockout(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 2, 1))
+    patch_local_today(monkeypatch, date(2024, 2, 1))
     snap = gather_status(settings, State(), fetch_live=False)
     assert snap.preview.sewer_lockout is True
     assert snap.preview.would_water is False
 
 
 def test_gather_status_live_weather(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     monkeypatch.setattr(
         "rain_bypass.logic.fetch_weather",
-        lambda _s: _snapshot(rain_mtd=0.0, forecast=0.0),
+        lambda _s: weather_snapshot(rain_mtd=0.0, forecast=0.0),
     )
     snap = gather_status(settings, State(), fetch_live=True)
     assert snap.preview.live is not None
@@ -157,7 +149,7 @@ def test_gather_status_live_weather(settings, monkeypatch) -> None:
 
 
 def test_gather_status_weather_error(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
 
     def _fail(_settings):
         from rain_bypass.exceptions import WeatherError
@@ -172,7 +164,7 @@ def test_gather_status_weather_error(settings, monkeypatch) -> None:
 
 
 def test_gather_status_cached_projects(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     state = State(
         watering_required=True,
         rainfall_inches=10.0,
@@ -186,13 +178,13 @@ def test_gather_status_cached_projects(settings, monkeypatch) -> None:
 
 
 def test_format_status_sections(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 3600.0)
     monkeypatch.setattr(
         "rain_bypass.logic.fetch_weather",
-        lambda _s: _snapshot(rain_mtd=1.0, forecast=0.2, max_daily=0.1),
+        lambda _s: weather_snapshot(rain_mtd=1.0, forecast=0.2, max_daily=0.1),
     )
     state = State(
         watering_required=True,
@@ -216,7 +208,7 @@ def test_format_status_sections(settings, monkeypatch) -> None:
 
 
 def test_format_status_cached_mode(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
@@ -236,7 +228,7 @@ def test_format_status_cached_mode(settings, monkeypatch) -> None:
 
 
 def test_format_status_cached_shows_mismatch(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
@@ -253,7 +245,7 @@ def test_format_status_cached_shows_mismatch(settings, monkeypatch) -> None:
 
 
 def test_format_status_cached_missing_safety_fields(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
@@ -271,7 +263,7 @@ def test_format_status_cached_missing_safety_fields(settings, monkeypatch) -> No
 
 
 def test_format_status_unknown_verdict(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
@@ -282,7 +274,7 @@ def test_format_status_unknown_verdict(settings, monkeypatch) -> None:
 
 
 def test_format_status_sewer_lockout(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 2, 1))
+    patch_local_today(monkeypatch, date(2024, 2, 1))
     fixed_now = datetime(2024, 2, 1, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
@@ -296,7 +288,7 @@ def test_format_status_live_without_weather_payload(settings, monkeypatch) -> No
     from rain_bypass.models import Preview
     from rain_bypass.status import StatusSnapshot, format_status
 
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     preview_result = Preview(
         effective_state=State(),
@@ -320,7 +312,7 @@ def test_format_status_live_without_weather_payload(settings, monkeypatch) -> No
 
 
 def test_format_status_weather_error(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
@@ -337,13 +329,13 @@ def test_format_status_weather_error(settings, monkeypatch) -> None:
 
 
 def test_format_status_freeze_block(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
     monkeypatch.setattr(
         "rain_bypass.logic.fetch_weather",
-        lambda _s: _snapshot(rain_mtd=0.0, freeze_block=True),
+        lambda _s: weather_snapshot(rain_mtd=0.0, freeze_block=True),
     )
     text = format_status(gather_status(settings, State(), fetch_live=True))
     assert "Freeze block" in text
@@ -353,23 +345,23 @@ def test_format_status_freeze_block(settings, monkeypatch) -> None:
 
 
 def test_format_status_block_verdict(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     fixed_now = datetime(2024, 7, 15, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     monkeypatch.setattr("rain_bypass.status.local_now", lambda _s, now=None: fixed_now)
     monkeypatch.setattr("rain_bypass.status.seconds_until_next_check", lambda _s, now=None: 60.0)
     monkeypatch.setattr(
         "rain_bypass.logic.fetch_weather",
-        lambda _s: _snapshot(rain_mtd=10.0, forecast=0.0),
+        lambda _s: weather_snapshot(rain_mtd=10.0, forecast=0.0),
     )
     text = format_status(gather_status(settings, State(), fetch_live=True))
     assert "BLOCK watering" in text
 
 
 def test_print_status_cli(settings_path, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     monkeypatch.setattr(
         "rain_bypass.logic.fetch_weather",
-        lambda _s: _snapshot(rain_mtd=0.0),
+        lambda _s: weather_snapshot(rain_mtd=0.0),
     )
     result = CliRunner().invoke(app, ["status", "--config", str(settings_path)])
     assert result.exit_code == 0
@@ -378,7 +370,7 @@ def test_print_status_cli(settings_path, monkeypatch) -> None:
 
 
 def test_print_status_cli_cached(settings_path, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     result = CliRunner().invoke(app, ["status", "--config", str(settings_path), "--cached"])
     assert result.exit_code == 0
     assert "Projected decision" in result.stdout
@@ -387,9 +379,11 @@ def test_print_status_cli_cached(settings_path, monkeypatch) -> None:
 
 def test_print_status_config_error(tmp_path: Path) -> None:
     missing = tmp_path / "missing.toml"
-    with patch("rain_bypass.status.load_settings", side_effect=ConfigError("bad config")):
-        with pytest.raises(ConfigError, match="bad config"):
-            print_status(missing)
+    with (
+        patch("rain_bypass.status.load_settings", side_effect=ConfigError("bad config")),
+        pytest.raises(ConfigError, match="bad config"),
+    ):
+        print_status(missing)
 
 
 def test_status_cli_config_error(tmp_path: Path) -> None:

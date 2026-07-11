@@ -2,42 +2,35 @@ from __future__ import annotations
 
 from datetime import date
 
+from conftest import patch_local_today, weather_snapshot
+
 from rain_bypass.config import State
 from rain_bypass.logic import evaluate_weather, preview
-from rain_bypass.models import Preview, WeatherSnapshot
-
-
-def _snapshot(
-    rain_mtd: float = 0.0,
-    forecast: float = 0.0,
-    max_daily: float = 0.0,
-    freeze_block: bool = False,
-) -> WeatherSnapshot:
-    return WeatherSnapshot(rain_mtd, forecast, max_daily, freeze_block)
+from rain_bypass.models import Preview
 
 
 def test_evaluate_weather_allows_when_deficit_meets_threshold(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
-    evaluation = evaluate_weather(settings, _snapshot(), 0.0, date(2024, 7, 15))
+    today = patch_local_today(monkeypatch, date(2024, 7, 15))
+    evaluation = evaluate_weather(settings, weather_snapshot(), 0.0, today)
     assert evaluation.watering_required is True
     assert evaluation.balance_ok is True
     assert evaluation.safety_ok is True
 
 
 def test_evaluate_weather_blocks_in_dormant_month(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 1, 10))
-    evaluation = evaluate_weather(settings, _snapshot(), 0.0, date(2024, 1, 10))
+    today = patch_local_today(monkeypatch, date(2024, 1, 10))
+    evaluation = evaluate_weather(settings, weather_snapshot(), 0.0, today)
     assert evaluation.watering_required is False
     assert evaluation.balance_ok is False
 
 
 def test_evaluate_weather_blocks_on_safety(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    today = patch_local_today(monkeypatch, date(2024, 7, 15))
     evaluation = evaluate_weather(
         settings,
-        _snapshot(max_daily=0.25),
+        weather_snapshot(max_daily=0.25),
         0.0,
-        date(2024, 7, 15),
+        today,
     )
     assert evaluation.watering_required is False
     assert evaluation.balance_ok is True
@@ -45,21 +38,21 @@ def test_evaluate_weather_blocks_on_safety(settings, monkeypatch) -> None:
 
 
 def test_preview_sewer_lockout(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 2, 1))
+    patch_local_today(monkeypatch, date(2024, 2, 1))
     result = preview(settings, State(), fetch_live=False)
     assert result.sewer_lockout is True
     assert result.would_water is False
 
 
 def test_preview_cached_verdict(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     result = preview(settings, State(watering_required=True), fetch_live=False)
     assert result.evaluation is None
     assert result.would_water is True
 
 
 def test_preview_cached_projects_from_saved_weather(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     state = State(
         watering_required=True,
         rainfall_inches=10.0,
@@ -76,7 +69,7 @@ def test_preview_cached_projects_from_saved_weather(settings, monkeypatch) -> No
 
 
 def test_preview_cached_safety_unknown_when_not_saved(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     state = State(
         watering_required=True,
         rainfall_inches=0.0,
@@ -89,7 +82,7 @@ def test_preview_cached_safety_unknown_when_not_saved(settings, monkeypatch) -> 
 
 
 def test_preview_cached_safety_unknown_blocks_on_balance(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     state = State(
         watering_required=True,
         rainfall_inches=10.0,
@@ -102,8 +95,8 @@ def test_preview_cached_safety_unknown_blocks_on_balance(settings, monkeypatch) 
 
 
 def test_preview_live_success(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
-    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot())
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot())
     result = preview(settings, State(), fetch_live=True)
     assert result.live is not None
     assert result.evaluation is not None
@@ -111,7 +104,7 @@ def test_preview_live_success(settings, monkeypatch) -> None:
 
 
 def test_preview_weather_error(settings, monkeypatch) -> None:
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
 
     def _fail(_settings):
         from rain_bypass.exceptions import WeatherError

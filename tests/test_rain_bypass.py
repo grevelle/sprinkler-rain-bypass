@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import respx
+from conftest import patch_local_today, timeline_day, weather_snapshot
 from typer.testing import CliRunner
 
 from rain_bypass.cli import app
@@ -22,8 +23,9 @@ from rain_bypass.controller import run, tick
 from rain_bypass.exceptions import WeatherError
 from rain_bypass.gpio import MockPins, PiPins, watering_pins
 from rain_bypass.logic import decide, safety_allows_watering
-from rain_bypass.models import WeatherSnapshot
 from rain_bypass.weather import (
+    TimelineDay,
+    _require_daily_rows,
     fetch_weather,
     freeze_block_for_days,
     max_daily_precip,
@@ -51,21 +53,6 @@ def _noop_pins(_gpio):
 
 def _weather_error(_settings):
     raise WeatherError("x")
-
-
-def _snapshot(
-    rain_mtd: float = 0.0,
-    forecast: float = 0.0,
-    max_daily: float = 0.0,
-    freeze_block: bool = False,
-) -> WeatherSnapshot:
-    return WeatherSnapshot(rain_mtd, forecast, max_daily, freeze_block)
-
-
-def _july(settings, monkeypatch):
-    fixed = date(2024, 7, 15)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: fixed)
-    return fixed
 
 
 def test_load_settings(settings):
@@ -107,16 +94,14 @@ def test_invalid_toml(settings_path):
 
 
 def test_event_lookback_window(settings, monkeypatch):
-    fixed = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: fixed)
+    fixed = patch_local_today(monkeypatch, date(2024, 6, 10))
     start, end = event_lookback_window(settings)
     assert end == fixed
     assert start == fixed - timedelta(days=settings.watering.event_lookback_days - 1)
 
 
 def test_forecast_and_timeline_windows(settings, monkeypatch):
-    fixed = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: fixed)
+    patch_local_today(monkeypatch, date(2024, 6, 10))
     assert forecast_window(settings) == (date(2024, 6, 11), date(2024, 6, 12))
     assert timeline_window(settings) == (date(2024, 6, 1), date(2024, 6, 12))
 
@@ -132,13 +117,16 @@ def test_month_start_helper():
 
 
 def test_safety_allows_watering(settings):
-    assert safety_allows_watering(_snapshot(0.0, 0.0, 0.24), settings) is True
-    assert safety_allows_watering(_snapshot(0.0, 0.0, 0.25), settings) is False
-    assert safety_allows_watering(_snapshot(0.0, 0.0, 0.0, freeze_block=True), settings) is False
+    assert safety_allows_watering(weather_snapshot(0.0, 0.0, 0.24), settings) is True
+    assert safety_allows_watering(weather_snapshot(0.0, 0.0, 0.25), settings) is False
+    assert (
+        safety_allows_watering(weather_snapshot(0.0, 0.0, 0.0, freeze_block=True), settings)
+        is False
+    )
     no_event = settings.model_copy(
         update={"watering": settings.watering.model_copy(update={"event_inches": 0})}
     )
-    assert safety_allows_watering(_snapshot(0.0, 0.0, 0.5), no_event) is True
+    assert safety_allows_watering(weather_snapshot(0.0, 0.0, 0.5), no_event) is True
 
 
 def test_timeline_params(settings):
@@ -150,13 +138,16 @@ def test_timeline_params(settings):
 def test_freeze_block(settings):
     today = date(2024, 6, 10)
     days = [
-        {"datetime": "2024-06-10", "tempmin": 40},
-        {"datetime": "2024-06-11", "tempmin": 28},
+        timeline_day(datetime="2024-06-10", tempmin=40),
+        timeline_day(datetime="2024-06-11", tempmin=28),
     ]
     assert freeze_block_for_days(days, settings, today) is True
-    days[1]["tempmin"] = 35
+    days = [
+        timeline_day(datetime="2024-06-10", tempmin=40),
+        timeline_day(datetime="2024-06-11", tempmin=35),
+    ]
     assert freeze_block_for_days(days, settings, today) is False
-    assert freeze_block_for_days([{"tempmin": 20}], settings, today) is False
+    assert freeze_block_for_days([timeline_day(tempmin=20)], settings, today) is False
 
 
 def test_seconds_until_next_check(settings):
@@ -184,9 +175,9 @@ def test_seconds_until_next_check_before_check_time_same_day(settings):
 
 def test_max_daily_precip():
     days = [
-        {"datetime": "2024-06-01", "precip": 0.1},
-        {"datetime": "2024-06-02", "precip": 0.4},
-        {"precip": 9.0},
+        timeline_day(datetime="2024-06-01", precip=0.1),
+        timeline_day(datetime="2024-06-02", precip=0.4),
+        timeline_day(precip=9.0),
     ]
     assert max_daily_precip(days, date(2024, 6, 1), date(2024, 6, 2)) == pytest.approx(0.4)
 
@@ -200,17 +191,23 @@ def test_parse_vc_datetime_variants():
 
 
 def test_sum_precip_sums_inches():
-    days = [{"datetime": "2024-06-01", "precip": 0.1}, {"datetime": "2024-06-02", "precip": 0.2}]
+    days = [
+        timeline_day(datetime="2024-06-01", precip=0.1),
+        timeline_day(datetime="2024-06-02", precip=0.2),
+    ]
     assert sum_precip(days, date(2024, 6, 1), date(2024, 6, 2)) == pytest.approx(0.3)
 
 
 def test_sum_precip_treats_null_as_zero():
-    days = [{"datetime": "2024-06-01", "precip": None}]
+    days = [timeline_day(datetime="2024-06-01", precip=None)]
     assert sum_precip(days, date(2024, 6, 1), date(2024, 6, 1)) == pytest.approx(0.0)
 
 
 def test_sum_precip_excludes_outside_window():
-    days = [{"datetime": "2024-06-01", "precip": 0.5}, {"datetime": "2024-06-10", "precip": 9.0}]
+    days = [
+        timeline_day(datetime="2024-06-01", precip=0.5),
+        timeline_day(datetime="2024-06-10", precip=9.0),
+    ]
     assert sum_precip(days, date(2024, 6, 1), date(2024, 6, 1)) == pytest.approx(0.5)
 
 
@@ -220,22 +217,49 @@ def test_sum_precip_empty_days_raises():
 
 
 def test_sum_precip_missing_datetime_raises():
-    days = [{"precip": 1.0}]
+    days = [timeline_day(precip=1.0)]
     with pytest.raises(WeatherError, match="missing datetime"):
         sum_precip(days, date(2024, 6, 1), date(2024, 6, 1))
 
 
 def test_sum_precip_day_count_mismatch_logs_warning(settings, caplog):
-    days = [{"datetime": "2024-06-01", "precip": 0.5}]
+    days = [timeline_day(datetime="2024-06-01", precip=0.5)]
     with caplog.at_level("WARNING"):
         total = sum_precip(days, date(2024, 6, 1), date(2024, 6, 7))
     assert total == pytest.approx(0.5)
     assert "expected 7" in caplog.text
 
 
+def test_require_daily_rows_from_dicts():
+    days = _require_daily_rows([{"datetime": "2024-06-10", "precip": 0.2}])
+    assert days[0].precip == pytest.approx(0.2)
+
+
+def test_require_daily_rows_none_raises():
+    with pytest.raises(WeatherError, match="missing daily data"):
+        _require_daily_rows(None)
+
+
+def test_require_daily_rows_non_list_raises():
+    with pytest.raises(WeatherError, match="missing daily data"):
+        _require_daily_rows("bad")
+
+
+def test_require_daily_rows_invalid_item_raises():
+    with pytest.raises(WeatherError, match="invalid JSON"):
+        _require_daily_rows([42])
+
+
+def test_require_daily_rows_invalid_day_raises():
+    with pytest.raises(WeatherError, match="invalid JSON"):
+        _require_daily_rows([{"precip": "not-a-number"}])
+
+
 def test_decide_allows_when_balance_and_safety_ok(settings, monkeypatch):
-    _july(settings, monkeypatch)
-    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0, 0.0, 0.0))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    monkeypatch.setattr(
+        "rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0, 0.0, 0.0)
+    )
     decision = decide(settings, State())
     assert decision.watering_required is True
     assert decision.evaluation is not None
@@ -245,11 +269,11 @@ def test_decide_allows_when_balance_and_safety_ok(settings, monkeypatch):
 
 
 def test_decide_blocks_when_forecast_fills_deficit(settings, monkeypatch):
-    _july(settings, monkeypatch)
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     target = 5.0 * (15 / 31)
     monkeypatch.setattr(
         "rain_bypass.logic.fetch_weather",
-        lambda _s: _snapshot(0.0, target, 0.0),
+        lambda _s: weather_snapshot(0.0, target, 0.0),
     )
     decision = decide(settings, State())
     assert decision.watering_required is False
@@ -258,8 +282,10 @@ def test_decide_blocks_when_forecast_fills_deficit(settings, monkeypatch):
 
 
 def test_decide_blocks_on_storm_event(settings, monkeypatch):
-    _july(settings, monkeypatch)
-    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0, 0.0, 0.25))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    monkeypatch.setattr(
+        "rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0, 0.0, 0.25)
+    )
     decision = decide(settings, State())
     assert decision.watering_required is False
     assert decision.evaluation is not None
@@ -267,8 +293,10 @@ def test_decide_blocks_on_storm_event(settings, monkeypatch):
 
 
 def test_decide_blocks_in_dormant_month(settings, monkeypatch):
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 1, 10))
-    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0, 0.0, 0.0))
+    patch_local_today(monkeypatch, date(2024, 1, 10))
+    monkeypatch.setattr(
+        "rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0, 0.0, 0.0)
+    )
     decision = decide(settings, State())
     assert decision.watering_required is False
     assert decision.evaluation is not None
@@ -276,10 +304,10 @@ def test_decide_blocks_in_dormant_month(settings, monkeypatch):
 
 
 def test_decide_blocks_on_freeze(settings, monkeypatch, caplog):
-    _july(settings, monkeypatch)
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     monkeypatch.setattr(
         "rain_bypass.logic.fetch_weather",
-        lambda _s: _snapshot(0.0, 0.0, 0.0, freeze_block=True),
+        lambda _s: weather_snapshot(0.0, 0.0, 0.0, freeze_block=True),
     )
     with caplog.at_level("INFO"):
         decision = decide(settings, State())
@@ -322,8 +350,7 @@ def test_in_sewer_lockout(settings):
 
 
 def test_decide_sewer_lockout_blocks(settings, monkeypatch, caplog):
-    fixed = date(2024, 2, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: fixed)
+    patch_local_today(monkeypatch, date(2024, 2, 10))
 
     def _no_api(_settings):
         raise AssertionError("weather API must not run during sewer lockout")
@@ -376,14 +403,16 @@ def test_tick_preserves_rainfall_on_weather_error(settings, tmp_path, monkeypatc
 
 
 def test_tick_persists_balance_state(settings, tmp_path, monkeypatch):
-    _july(settings, monkeypatch)
+    patch_local_today(monkeypatch, date(2024, 7, 15))
     state_path = tmp_path / "state.json"
     settings = settings.model_copy(
         update={
             "runtime": settings.runtime.model_copy(update={"state_path": state_path}),
         }
     )
-    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0, 0.0, 0.0))
+    monkeypatch.setattr(
+        "rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0, 0.0, 0.0)
+    )
     saved = tick(settings, State(), lambda _required: None)
     assert saved.irrigation_inches_mtd == pytest.approx(0.3)
     assert saved.balance_month == 7
@@ -461,7 +490,7 @@ def test_resolve_location_missing_fields():
 @respx.mock
 def test_fetch_weather(settings, monkeypatch):
     today = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: today)
+    patch_local_today(monkeypatch, today)
     api_start, api_end = timeline_window(settings)
     lookback_start, lookback_end = event_lookback_window(settings)
     forecast_start, forecast_end = forecast_window(settings)
@@ -480,13 +509,14 @@ def test_fetch_weather(settings, monkeypatch):
     url = timeline_url_for(settings, api_start, api_end)
     respx.get(url).mock(return_value=httpx.Response(200, json=payload))
     snapshot = fetch_weather(settings)
+    parsed_days = [TimelineDay.model_validate(day) for day in payload["days"]]
     mtd_start = month_start(today)
-    assert snapshot.rain_mtd == pytest.approx(sum_precip(payload["days"], mtd_start, today))
+    assert snapshot.rain_mtd == pytest.approx(sum_precip(parsed_days, mtd_start, today))
     assert snapshot.forecast_inches == pytest.approx(
-        sum_precip(payload["days"], forecast_start, forecast_end)
+        sum_precip(parsed_days, forecast_start, forecast_end)
     )
     assert snapshot.max_daily_inches == pytest.approx(
-        max_daily_precip(payload["days"], lookback_start, lookback_end)
+        max_daily_precip(parsed_days, lookback_start, lookback_end)
     )
     params = respx.calls.last.request.url.params
     assert params["key"] == settings.weather.api_key
@@ -496,7 +526,7 @@ def test_fetch_weather(settings, monkeypatch):
 @respx.mock
 def test_fetch_weather_logs_query_cost_at_debug(settings, monkeypatch, caplog):
     today = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: today)
+    patch_local_today(monkeypatch, today)
     api_start, api_end = timeline_window(settings)
     url = timeline_url_for(settings, api_start, api_end)
     respx.get(url).mock(
@@ -517,7 +547,7 @@ def test_fetch_weather_logs_query_cost_at_debug(settings, monkeypatch, caplog):
 @respx.mock
 def test_fetch_weather_timezone_mismatch_warns(settings, monkeypatch, caplog):
     today = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: today)
+    patch_local_today(monkeypatch, today)
     api_start, api_end = timeline_window(settings)
     url = timeline_url_for(settings, api_start, api_end)
     respx.get(url).mock(
@@ -537,11 +567,11 @@ def test_fetch_weather_timezone_mismatch_warns(settings, monkeypatch, caplog):
 @respx.mock
 def test_fetch_weather_missing_days(settings, monkeypatch):
     today = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: today)
+    patch_local_today(monkeypatch, today)
     api_start, api_end = timeline_window(settings)
     url = timeline_url_for(settings, api_start, api_end)
     respx.get(url).mock(return_value=httpx.Response(200, json={"days": "bad"}))
-    with pytest.raises(WeatherError, match="missing daily data"):
+    with pytest.raises(WeatherError, match="invalid JSON"):
         fetch_weather(settings)
 
 
@@ -552,7 +582,7 @@ def test_fetch_weather_missing_days(settings, monkeypatch):
 )
 def test_fetch_weather_http_errors(settings, monkeypatch, status, message):
     today = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: today)
+    patch_local_today(monkeypatch, today)
     api_start, api_end = timeline_window(settings)
     url = timeline_url_for(settings, api_start, api_end)
     respx.get(url).mock(return_value=httpx.Response(status))
@@ -563,7 +593,7 @@ def test_fetch_weather_http_errors(settings, monkeypatch, status, message):
 @respx.mock
 def test_fetch_weather_invalid_json(settings, monkeypatch):
     today = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: today)
+    patch_local_today(monkeypatch, today)
     api_start, api_end = timeline_window(settings)
     url = timeline_url_for(settings, api_start, api_end)
     respx.get(url).mock(return_value=httpx.Response(200, text="not json"))
@@ -574,7 +604,7 @@ def test_fetch_weather_invalid_json(settings, monkeypatch):
 @respx.mock
 def test_fetch_weather_non_object_json(settings, monkeypatch):
     today = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: today)
+    patch_local_today(monkeypatch, today)
     api_start, api_end = timeline_window(settings)
     url = timeline_url_for(settings, api_start, api_end)
     respx.get(url).mock(return_value=httpx.Response(200, json=[]))
@@ -585,7 +615,7 @@ def test_fetch_weather_non_object_json(settings, monkeypatch):
 @respx.mock
 def test_fetch_weather_no_forecast_window(settings, monkeypatch):
     today = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: today)
+    patch_local_today(monkeypatch, today)
     no_forecast = settings.model_copy(
         update={"balance": settings.balance.model_copy(update={"forecast_days": 0})}
     )
@@ -609,7 +639,7 @@ def test_fetch_weather_no_forecast_window(settings, monkeypatch):
 @respx.mock
 def test_fetch_weather_connection_error(settings, monkeypatch):
     today = date(2024, 6, 10)
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: today)
+    patch_local_today(monkeypatch, today)
     api_start, api_end = timeline_window(settings)
     url = timeline_url_for(settings, api_start, api_end)
     respx.get(url).mock(side_effect=httpx.ConnectError("down"))
@@ -620,7 +650,7 @@ def test_fetch_weather_connection_error(settings, monkeypatch):
 def test_weather_api_smoke(settings, monkeypatch):
     monkeypatch.setattr(
         "rain_bypass.weather.fetch_weather",
-        lambda _s: _snapshot(0.5, 0.1, 0.2),
+        lambda _s: weather_snapshot(0.5, 0.1, 0.2),
     )
     message = weather_api_smoke(settings)
     assert message.startswith("API OK:")
@@ -642,7 +672,7 @@ def test_run_once(tmp_path, settings_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 2, 1))
+    patch_local_today(monkeypatch, date(2024, 2, 1))
     settings = load_settings(settings_path)
     run(settings, once=True, pin_factory=_noop_pins)
     saved = State.load(state_path)
@@ -651,8 +681,8 @@ def test_run_once(tmp_path, settings_path, monkeypatch):
 
 
 def test_run_loop(settings, monkeypatch):
-    _july(settings, monkeypatch)
-    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0))
 
     def _stop(_seconds: float) -> None:
         raise KeyboardInterrupt
@@ -662,8 +692,8 @@ def test_run_loop(settings, monkeypatch):
 
 
 def test_run_loop_uses_scheduled_check(settings, monkeypatch):
-    _july(settings, monkeypatch)
-    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0))
 
     def _stop(seconds: float) -> None:
         assert seconds == pytest.approx(42.0)
@@ -730,8 +760,8 @@ def test_run_applies_cached_state_before_tick(tmp_path, settings_path, monkeypat
     )
     settings = load_settings(settings_path)
     State(watering_required=True).save(state_path)
-    _july(settings, monkeypatch)
-    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0))
     run(settings, once=True, pin_factory=tracking_pins)
     assert calls[0] is True
     assert calls[-1] is True
@@ -756,21 +786,23 @@ def test_run_applies_fail_safe_when_no_cached_state(tmp_path, settings_path, mon
         encoding="utf-8",
     )
     settings = load_settings(settings_path)
-    _july(settings, monkeypatch)
-    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0))
     run(settings, once=True, pin_factory=tracking_pins)
     assert calls[0] is False
     assert calls[-1] is True
 
 
 def test_watering_pins_requires_gpio_extra(pi_gpio):
-    with patch(
-        "rain_bypass.gpio._import_gpiozero",
-        side_effect=ImportError("gpiozero not installed"),
+    with (
+        patch(
+            "rain_bypass.gpio._import_gpiozero",
+            side_effect=ImportError("gpiozero not installed"),
+        ),
+        pytest.raises(RuntimeError, match=r"gpio\.mock"),
+        watering_pins(pi_gpio),
     ):
-        with pytest.raises(RuntimeError, match="gpio.mock"):
-            with watering_pins(pi_gpio):
-                pass
+        pass
 
 
 def test_watering_pins_pi_cleanup(fake_output_device, pi_gpio):
@@ -780,8 +812,8 @@ def test_watering_pins_pi_cleanup(fake_output_device, pi_gpio):
 
 
 def test_main_once(settings_path, monkeypatch):
-    monkeypatch.setattr("rain_bypass.config.local_today", lambda _loc: date(2024, 7, 15))
-    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: _snapshot(0.0))
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0))
     result = CliRunner().invoke(app, ["--config", str(settings_path), "--once"])
     assert result.exit_code == 0
 
