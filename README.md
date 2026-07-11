@@ -54,6 +54,16 @@ On boot the relay **blocks watering** until the first check completes, then appl
 cd ~/sprinkler-rain-bypass
 ```
 
+```mermaid
+flowchart LR
+  rb[rain-bypass] --> run["(default) run loop / --once"]
+  rb --> status[status]
+  rb --> history[history]
+  rb --> serve[serve]
+  install[rain-bypass-install] --> wizard[install / configure]
+  install --> autoup[setup-autoupdate]
+```
+
 Then use `.venv/bin/python -m rain_bypass …` or activate the venv so `rain-bypass` is on your PATH:
 
 ```bash
@@ -154,6 +164,16 @@ If mDNS does not work on your phone (some Android browsers), use **`http://<pi-i
 ### Watering history
 
 Each control cycle (`--once` or the daily check) appends one line to **`watering_history.jsonl`** next to `state.json` (or `runtime.history_path` if set). **This file is the single source of truth** for how much irrigation has been credited this month — balance decisions sum `inches_credited` from the log; `state.json` holds only relay and weather snapshot fields. Records older than one year are dropped automatically on each append. This logs the bypass **decision** and inches credited — not confirmation that Rain Bird actually ran.
+
+```mermaid
+flowchart LR
+  tick[tick / daily check] --> decide[decide]
+  decide --> relay[state.json<br/>relay + weather snapshot]
+  decide --> hist[watering_history.jsonl<br/>decision log + inches credited]
+  hist --> balance[Balance math<br/>irrigation_mtd]
+  relay --> status[status / web<br/>read-only views]
+  hist --> status
+```
 
 ```bash
 cd ~/sprinkler-rain-bypass
@@ -270,16 +290,17 @@ ruff check .
 ruff check --fix .
 ruff format .
 ruff format --check .
-shellcheck install.sh configure.sh scripts/auto-update.sh
+shellcheck install.sh configure.sh scripts/auto-update.sh scripts/lib/common.sh
 python scripts/check_lf.py
 pyright
+python -m vulture src/rain_bypass vulture_whitelist.py --min-confidence 80
 pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100
 pre-commit run --all-files
 ```
 
-Ruff enables `E`, `F`, `I`, `UP`, `B`, `SIM`, and `RUF`. Dependencies and GitHub Actions refs stay **unpinned** (latest on each install/CI run).
+Ruff enables `E`, `F`, `I`, `UP`, `B`, `SIM`, and `RUF`. Dependencies and GitHub Actions refs stay **unpinned** (latest on each install/CI run). CI also runs **vulture** (dead-code detection) and **ShellCheck** on `install.sh`, `configure.sh`, `scripts/auto-update.sh`, and `scripts/lib/common.sh`.
 
-Shared test helpers live in `tests/conftest.py` (`weather_snapshot`, `timeline_day`, `patch_local_today`).
+Shared test helpers live in `tests/conftest.py` (`weather_snapshot`, `timeline_day`, `patch_local_today`, `watering_record`, `build_dashboard`). Tests are split by domain — see [Code layout](#code-layout).
 
 Live weather smoke test (needs real `settings.toml` with API key):
 
@@ -290,6 +311,29 @@ pytest -q -m live
 ## Usage
 
 Once installed, the Pi runs as a **systemd service** (`rain-bypass`). You usually leave it alone — it wakes at the configured check time (default **midnight** local), fetches weather, decides ON or OFF for that day’s irrigation cycle, and sets the relay. Rain Bird (or your controller) runs its daily program as usual; the bypass relay acts like a rain sensor.
+
+```mermaid
+flowchart LR
+  subgraph pi [Raspberry Pi]
+    svc[rain-bypass.service]
+    relay[Relay + LEDs]
+    state[(state.json)]
+    hist[(watering_history.jsonl)]
+  end
+
+  subgraph external [External]
+    vc[Visual Crossing API]
+    panel[Irrigation controller]
+  end
+
+  svc -->|daily check| vc
+  svc --> relay
+  relay -->|dry contact| panel
+  svc --> state
+  svc --> hist
+```
+
+On boot the service applies the **last saved relay state** immediately (fail-safe **block** if none), then **waits** until the next scheduled check before running weather + decision logic.
 
 See [Command reference](#command-reference) for every shell command.
 
@@ -384,6 +428,29 @@ Two layers run each morning check:
 watering_required = balance_ok AND safety_ok AND NOT sewer
 ```
 
+```mermaid
+flowchart TD
+  start([Scheduled check]) --> sewer{In sewer lockout window?}
+  sewer -->|yes| blockSewer[BLOCK — no API call]
+  sewer -->|no| fetch[Fetch Visual Crossing timeline]
+  fetch -->|API error| failMode{fail_mode}
+  failMode -->|disable_watering| blockFail[BLOCK]
+  failMode -->|keep_last_state| keep[Keep prior relay state]
+  fetch -->|ok| eval[evaluate_weather]
+  eval --> balance{balance_ok?<br/>deficit ≥ inches_per_cycle}
+  balance -->|no| blockBal[BLOCK]
+  balance -->|yes| safety{safety_ok?<br/>no freeze / storm}
+  safety -->|no| blockSafe[BLOCK]
+  safety -->|yes| allow[ALLOW — credit inches_per_cycle]
+  blockSewer --> persist[Append history + save state.json]
+  blockFail --> persist
+  keep --> persist
+  blockBal --> persist
+  blockSafe --> persist
+  allow --> persist
+  persist --> gpio[Set relay + LEDs]
+```
+
 There is **no weekly schedule** — each day recomputes one ON/OFF for the next cycle only. One [Visual Crossing Timeline API](https://www.visualcrossing.com/resources/documentation/weather-api/timeline-weather-api/) request returns daily rows; `precip` is summed in **inches** (`unitGroup=us`).
 
 **Check timing:** The loop sleeps until the next `check_hour`:`check_minute` in `location.timezone` (default **00:00** / midnight).
@@ -399,23 +466,126 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and migration notes (e.g. v
 
 ## Code
 
-Layered Python package under `src/rain_bypass/`:
+Layered Python package under `src/rain_bypass/`. Shell scripts share helpers from `scripts/lib/common.sh` (`install.sh`, `scripts/auto-update.sh`).
 
-| Layer | Modules |
-| ----- | ------- |
-| **Core** | `paths`, `config`, `models`, `balance`, `windows`, `weather`, `logic`, `controller`, `gpio`, `status`, `history`, `web`, `cli` |
-| **Installer** | `install_cli` (Typer app), `install_flow`, `install_prompts`, `prompting` |
-| **Deploy** | `deploy` (systemd units, mDNS/Avahi setup, auto-update timer) |
-| **Support** | `platform`, `logging_setup`, `exceptions` |
+### Repository layout
 
-- **`weather`** — Visual Crossing Timeline API via httpx; responses validated as Pydantic `TimelineDay` / `TimelineResponse` before balance math.
-- **`logic`** — `preview()` / `decide()` and `evaluate_weather()`; shared `Evaluation` / `Preview` types in `models`.
-- **`install_cli`** — thin entry point only; prompts live in `install_prompts`, install/configure flow in `install_flow`, shared Typer prompters in `prompting` (also used by `deploy`).
+```mermaid
+flowchart TB
+  subgraph repo [sprinkler-rain-bypass]
+    src["src/rain_bypass/<br/>application package"]
+    static["static/dashboard.css<br/>web UI styles"]
+    tests["tests/<br/>domain-split pytest modules"]
+    scripts["scripts/<br/>ci, auto-update, lib/common.sh"]
+    deploy["deploy/<br/>systemd unit templates"]
+    settings["settings.example.toml<br/>canonical defaults"]
+  end
+
+  src --> static
+  install["install.sh / configure.sh"] --> scripts
+  install --> src
+```
+
+### Runtime architecture
+
+```mermaid
+flowchart TB
+  subgraph entry [CLI entry points]
+    main["rain-bypass<br/>cli.py"]
+    installer["rain-bypass-install<br/>install_cli.py"]
+  end
+
+  subgraph loop [Control loop]
+    controller[controller.py<br/>run / tick]
+    logic[logic.py<br/>decide / preview / evaluate_weather]
+    gpio[gpio.py<br/>MockPins / PiPins]
+  end
+
+  subgraph io [Weather & persistence]
+    weather[weather.py]
+    windows[windows.py]
+    balance[balance.py]
+    history[history.py]
+    config[config.py]
+  end
+
+  subgraph views [Read-only views]
+    status[status.py]
+    web["web.py + static/dashboard.css"]
+  end
+
+  subgraph deployMod [Deploy]
+    deploy[deploy.py]
+    flow[install_flow.py / install_prompts.py]
+  end
+
+  main --> controller
+  main --> status
+  main --> web
+  main --> history
+  installer --> flow --> deploy
+  controller --> logic
+  controller --> gpio
+  controller --> history
+  logic --> weather
+  logic --> balance
+  logic --> windows
+  logic --> history
+  status --> logic
+  web --> status
+  web --> history
+  weather --> windows
+  config --> logic
+```
+
+| Layer | Modules | Role |
+| ----- | ------- | ---- |
+| **Core** | `paths`, `config`, `models`, `balance`, `windows`, `weather`, `logic`, `controller`, `gpio` | Daily check loop, weather fetch, balance math, relay control |
+| **Persistence & views** | `history`, `status`, `web` | Append-only decision log; CLI status; HTML dashboard (`static/dashboard.css`) |
+| **CLI** | `cli`, `__main__` | `rain-bypass` — run, status, history, serve |
+| **Installer** | `install_cli`, `install_flow`, `install_prompts`, `prompting` | Interactive setup wizard (`rain-bypass-install`) |
+| **Deploy** | `deploy` | systemd units, mDNS/Avahi, auto-update timer |
+| **Support** | `platform`, `logging_setup`, `exceptions` | Pi detection, logging, shared errors |
+
+**Shared display helpers** (single source of truth for CLI, history, and web):
+
+| Helper | Module | Used by |
+| ------ | ------ | ------- |
+| `watering_verdict()` / `watering_record_details()` | `history.py` | `history` CLI, web dashboard rows |
+| `format_inches()` | `status.py` | status CLI, web dashboard |
+| `format_sewer_range()` | `config.py` | status, web |
+| `gather_status()` / `preview()` | `status.py` / `logic.py` | status CLI, web dashboard |
+
+- **`weather`** — Visual Crossing Timeline API via httpx; responses validated as Pydantic `TimelineDay` before balance math.
+- **`logic`** — `decide()` runs the full control pipeline; `preview()` / `evaluate_weather()` power read-only status and web views.
+- **`controller`** — `tick()` calls `decide()`, sets GPIO, appends history, saves `state.json`; `run()` loops until the next check time.
+- **`install_cli`** — thin Typer entry point; prompts in `install_prompts`, flow in `install_flow`, shared prompters in `prompting`.
 - **`settings.example.toml`** — canonical defaults for install, tests, and `rain_bypass.config`.
+
+### Code layout
+
+| Path | Purpose |
+| ---- | ------- |
+| `src/rain_bypass/` | Application source (~22 modules + `static/dashboard.css`) |
+| `tests/test_rain_bypass.py` | Config + `decide()` integration smoke |
+| `tests/test_weather.py` | Visual Crossing client, precip helpers |
+| `tests/test_windows.py` | Date windows, scheduled check timing |
+| `tests/test_controller.py` | `run` / `tick`, CLI main |
+| `tests/test_gpio.py` | Relay driver (mock + Pi) |
+| `tests/test_logic.py` | `preview` / `evaluate_weather` |
+| `tests/test_history.py` | Watering log, verdict/details helpers |
+| `tests/test_status.py` | Text status formatting |
+| `tests/test_web.py` | HTML dashboard |
+| `tests/test_balance.py`, `test_config_io.py`, … | Focused unit tests |
+| `tests/conftest.py` | Shared fixtures and factories |
+| `scripts/ci.sh` / `ci.ps1` | Local CI gate (mirrors GitHub Actions) |
+| `scripts/lib/common.sh` | Shared shell helpers for install and auto-update |
+| `vulture_whitelist.py` | Intentional “dead code” entries for vulture CI |
+| `deploy/*.service.in` | systemd unit templates |
 
 Typer powers `rain-bypass` and `rain-bypass-install`. The package ships **`py.typed`** (PEP 561) for downstream type checkers. Code targets **Python 3.12+** syntax (PEP 695 aliases, `match`/`case`, `typing.override`); CI and the Pi runtime use the latest **3.x** (3.13 on current Pi OS).
 
-**Quality gate:** pre-commit (Ruff + ShellCheck), Pyright strict, pytest with **100% branch coverage** (`pytest -m "not live"`). See [Development & CI](#development--ci).
+**Quality gate:** pre-commit (Ruff + ShellCheck), Pyright strict, vulture, pytest with **100% branch coverage** (`pytest -m "not live"`). See [Development & CI](#development--ci).
 
 ## Development
 

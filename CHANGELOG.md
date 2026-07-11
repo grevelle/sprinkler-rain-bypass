@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Watering history** — `watering_history.jsonl` is the single source of truth for irrigation credited this month; each control cycle appends a record, entries older than one year are pruned on append; view with `rain-bypass history`. Legacy `irrigation_inches_mtd` in `state.json` migrates into history on first run.
+- **Internal simplification** — dead code removed; **vulture** dead-code gate in CI; dashboard CSS moved to `src/rain_bypass/static/dashboard.css`; shared shell helpers in `scripts/lib/common.sh`; display helpers consolidated in `history` / `status` / `config` (`watering_verdict`, `format_inches`, `format_sewer_range`).
+- **Test suite** — reorganized into domain-split modules (`test_weather`, `test_windows`, `test_controller`, `test_gpio`, slim `test_rain_bypass`); parametrized variant tests; shared `watering_record` / `build_dashboard` fixtures in `conftest.py`. 100% branch coverage unchanged.
 - **Daily auto-update** (`scripts/auto-update.sh`) now runs `apt update` and `apt dist-upgrade` before the application update, matching a manual full OS upgrade.
 - GPIO backend migrated from `RPi.GPIO` to GPIO Zero + lgpio; behavior and pin config unchanged.
 - Internal typing/syntax modernization: Pydantic `TimelineDay`/`TimelineResponse` models in `weather.py`, PEP 695 type aliases, `typing.override`, strategic `match`/`case`, Ruff `SIM`/`RUF` rules. No user-facing behavior change.
