@@ -49,7 +49,43 @@ class DashboardBalance:
     deficit_class: str
     progress_pct: int
     cycle_threshold: str
-    headline: str
+
+
+_RAIN_STAT_ICON = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+    '<path d="M20 16.2A4.5 4.5 0 0 0 17.5 8h-.3A6 6 0 1 0 6 16.2"/>'
+    '<path d="M8 19v2M12 19v2M16 19v2"/>'
+    "</svg>"
+)
+_IRRIGATION_STAT_ICON = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+    '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>'
+    "</svg>"
+)
+_RECEIVED_STAT_ICON = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+    '<path d="M12 2L2 7l10 5 10-5-10-5z"/>'
+    '<path d="M2 17l10 5 10-5"/>'
+    '<path d="M2 12l10 5 10-5"/>'
+    "</svg>"
+)
+
+
+def _balance_stat_html(
+    label: str,
+    value: str,
+    icon: str,
+    esc: Callable[[str], str],
+    *,
+    extra_class: str = "",
+) -> str:
+    stat_class = f"balance-stat {extra_class}".strip()
+    return f"""
+      <div class="{stat_class}">
+        <span class="balance-stat-icon" aria-hidden="true">{icon}</span>
+        <span class="balance-stat-label">{esc(label)}</span>
+        <span class="balance-stat-value">{esc(value)}</span>
+      </div>"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,9 +216,6 @@ def _build_balance(
     else:
         deficit_class = "even"
         deficit_note = "On target — no watering needed for balance"
-    headline = (
-        f"{received:.2f} in received (rain + irrigation) toward {target:.2f} in needed to date"
-    )
     return DashboardBalance(
         target=_format_inches(target),
         rain=_format_inches(rain),
@@ -195,7 +228,6 @@ def _build_balance(
         deficit_class=deficit_class,
         progress_pct=progress_pct,
         cycle_threshold=_format_inches(inches_per_cycle),
-        headline=headline,
     )
 
 
@@ -307,7 +339,6 @@ def _balance_card_html(balance: DashboardBalance, esc: Callable[[str], str]) -> 
       <h2>Water budget</h2>
       <span>Target {esc(balance.target)}</span>
     </div>
-    <p class="balance-headline">{esc(balance.headline)}</p>
     <div class="balance-track" role="progressbar"
          aria-valuenow="{balance.progress_pct}" aria-valuemin="0" aria-valuemax="100"
          aria-label="Water received toward monthly target pace">
@@ -315,18 +346,17 @@ def _balance_card_html(balance: DashboardBalance, esc: Callable[[str], str]) -> 
            style="width:{balance.progress_pct}%"></div>
     </div>
     <div class="balance-stats">
-      <div class="balance-stat">
-        <span class="balance-stat-label">Rain</span>
-        <span class="balance-stat-value">{esc(balance.rain)}</span>
-      </div>
-      <div class="balance-stat">
-        <span class="balance-stat-label">Irrigation</span>
-        <span class="balance-stat-value">{esc(balance.irrigation)}</span>
-      </div>
-      <div class="balance-stat balance-stat-total">
-        <span class="balance-stat-label">Received</span>
-        <span class="balance-stat-value">{esc(balance.received)}</span>
-      </div>
+{_balance_stat_html("Rain", balance.rain, _RAIN_STAT_ICON, esc)}
+{_balance_stat_html("Irrigation", balance.irrigation, _IRRIGATION_STAT_ICON, esc)}
+{
+        _balance_stat_html(
+            "Received",
+            balance.received,
+            _RECEIVED_STAT_ICON,
+            esc,
+            extra_class="balance-stat-total",
+        )
+    }
     </div>
     <div class="balance-foot">
       <div class="balance-foot-row">
@@ -680,13 +710,6 @@ body::before {{
   line-height: 1.35;
 }}
 .balance-card {{ padding-bottom: 1rem; }}
-.balance-headline {{
-  margin: 0 0 0.85rem;
-  font-size: 0.88rem;
-  line-height: 1.45;
-  color: var(--text);
-  font-weight: 600;
-}}
 .balance-track {{
   height: 0.72rem;
   border-radius: 999px;
@@ -719,6 +742,16 @@ body::before {{
 .balance-stat-total {{
   background: rgba(13, 148, 136, 0.1);
   border: 1px solid rgba(13, 148, 136, 0.16);
+}}
+.balance-stat-icon {{
+  display: block;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0 auto 0.35rem;
+  color: var(--muted);
+}}
+.balance-stat-total .balance-stat-icon {{
+  color: var(--accent);
 }}
 .balance-stat-label {{
   display: block;

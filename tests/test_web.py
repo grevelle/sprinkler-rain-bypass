@@ -174,7 +174,7 @@ def test_build_dashboard_view_cached(settings, settings_path: Path, monkeypatch)
     assert view.refresh_seconds == 60
     assert view.mode_label == "Saved forecast"
     assert view.balance is not None
-    assert "received" in view.balance.headline
+    assert view.balance.received
     assert view.hero_subtitle == "Allow if panel runs today"
 
 
@@ -366,6 +366,8 @@ def test_render_with_history_rows(settings, settings_path: Path, monkeypatch) ->
     assert "+0.30 in" in html_text
     assert "Irrigation credited" in html_text
     assert "Water budget" in html_text
+    assert "balance-stat-icon" in html_text
+    assert "balance-headline" not in html_text
     assert "next-check-value" in html_text
 
 
