@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Daily auto-update timer** moved from **12:00** to **15:00** local (`rain-bypass-auto-update.timer`).
+- **OS unattended-upgrades** — download upgradeable packages ahead of time; remove unused kernel packages; enable automatic reboot at **15:00** (aligned with the app auto-update window).
 - **Dead code** — removed unused test fixtures/mock state; added CI gates for vulture-on-tests, dashboard CSS orphans, conftest fixture references, and shell function references; pyright unused-symbol reports enabled for `src/`.
 - **Architecture SSOT** — weather persistence (`persisted_weather`), verdict labels (`verdict_badge`), balance display (`balance_display`), and legacy state key stripping consolidated; net fewer `src/` lines, no behavior change.
 - **Architecture polish (9.8+)** — `format_status` live/saved branches both route through `_append_weather_and_balance`; dashboard HTML extracted to `dashboard_html.py` (`web.py` = view assembly + HTTP only). Docs updated. No behavior change.

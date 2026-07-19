@@ -42,7 +42,7 @@ cp settings.example.toml settings.toml
 | GPIO library | **GPIO Zero** (`lgpio` backend on Bookworm+) — works on Zero W through Pi 5 |
 | Relay module | **3.3 V** logic (see Hardware below) |
 | systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
-| Maintenance | Optional **daily auto-update** at 12:00 — `apt dist-upgrade`, `git pull`, pip, service restart (plus morning `unattended-upgrades`; see [Automatic updates](#automatic-daily-updates)) |
+| Maintenance | Optional **daily auto-update** at 15:00 — `apt dist-upgrade`, `git pull`, pip, service restart (plus morning `unattended-upgrades`; see [Automatic updates](#automatic-daily-updates)) |
 
 On boot the relay **blocks watering** until the first check completes, then applies the decision from the daily check.
 
@@ -226,10 +226,10 @@ sudo systemctl restart rain-bypass
 
 | Timer | When | What |
 | ----- | ---- | ---- |
-| `apt-daily-upgrade.timer` | ~06:00–07:00 (system default) | **OS packages** via `unattended-upgrades` (Debian/Raspbian standard) |
-| `rain-bypass-auto-update.timer` | **12:00** | **`apt update` + `apt dist-upgrade`**, **`git pull`**, **`pip install`**, restart `rain-bypass`; **reboot** if kernel/glibc update pending |
+| `apt-daily-upgrade.timer` | ~06:00–07:00 (system default) | **OS packages** via `unattended-upgrades` (downloads upgrades in advance; removes unused deps/kernels; **reboot at 15:00** if required) |
+| `rain-bypass-auto-update.timer` | **15:00** | **`apt update` + `apt dist-upgrade`**, **`git pull`**, **`pip install`**, restart `rain-bypass`; **reboot** if kernel/glibc update pending |
 
-`setup-autoupdate` installs `unattended-upgrades`, writes `/etc/apt/apt.conf.d/20auto-upgrades` and `51unattended-upgrades-rain-bypass`, and enables both timer sets.
+`setup-autoupdate` installs `unattended-upgrades`, writes `/etc/apt/apt.conf.d/20auto-upgrades` and `51unattended-upgrades-rain-bypass`, and enables both timer sets. Morning upgrades may download packages early; any pending reboot is scheduled for **15:00** (same window as the app auto-update).
 
 Enable on an existing Pi:
 

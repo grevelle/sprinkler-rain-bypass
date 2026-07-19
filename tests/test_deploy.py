@@ -190,7 +190,7 @@ def test_render_autoupdate_service_missing_template(monkeypatch, tmp_path):
 
 def test_render_autoupdate_timer():
     text = render_autoupdate_timer()
-    assert "OnCalendar=*-*-* 12:00:00" in text
+    assert "OnCalendar=*-*-* 15:00:00" in text
 
 
 def test_render_autoupdate_timer_missing_template(monkeypatch, tmp_path):

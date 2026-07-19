@@ -271,7 +271,7 @@ def install_autoupdate(
         )
         return
     if not skip_confirm and not prompter.confirm(
-        "Enable daily automatic OS and application updates (12:00)?",
+        "Enable daily automatic OS and application updates (15:00)?",
         default=True,
     ):
         return
