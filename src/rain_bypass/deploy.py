@@ -128,6 +128,68 @@ def ensure_mdns(*, run_command: RunCommand | None = None) -> bool:
     return False
 
 
+def ensure_wifi_reliability(*, run_command: RunCommand | None = None) -> bool:
+    """Disable Wi-Fi power save and set infinite NetworkManager reconnect retries.
+
+    Pi Zero W (brcmfmac) often fails to reassociate after an AP outage when power
+    save is on; a reboot then appears required. Returns True when the NM drop-in
+    was installed.
+    """
+    if os.name != "posix":
+        return False
+    runner: RunCommand = run_command or subprocess.run
+    if shutil.which("nmcli") is None:
+        return False
+
+    conf_src = DEPLOY_DIR / "nm-99-wifi-powersave-off.conf"
+    conf_dst = Path("/etc/NetworkManager/conf.d/99-wifi-powersave-off.conf")
+    if not conf_src.is_file():
+        typer.secho(
+            "warning: Wi-Fi powersave template missing; skipping Wi-Fi reliability setup.",
+            fg=typer.colors.YELLOW,
+        )
+        return False
+
+    typer.echo("==> Disabling Wi-Fi power save (Pi reconnect reliability)")
+    runner(
+        ["sudo", "tee", str(conf_dst)],
+        input=conf_src.read_bytes(),
+        check=True,
+    )
+
+    listed = runner(
+        ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    wifi_names: list[str] = []
+    if listed.returncode == 0 and listed.stdout:
+        raw = listed.stdout
+        text = raw.decode() if isinstance(raw, bytes) else raw
+        for line in text.splitlines():
+            name, _, conn_type = line.partition(":")
+            if conn_type in {"802-11-wireless", "wifi"} and name:
+                wifi_names.append(name)
+
+    for name in wifi_names:
+        runner(
+            ["sudo", "nmcli", "connection", "modify", name, "802-11-wireless.powersave", "2"],
+            check=False,
+        )
+        runner(
+            ["sudo", "nmcli", "connection", "modify", name, "connection.autoconnect-retries", "0"],
+            check=False,
+        )
+
+    iw = shutil.which("iw") or "/sbin/iw"
+    if Path(iw).is_file():
+        runner([iw, "dev", "wlan0", "set", "power_save", "off"], check=False)
+
+    typer.echo("==> Wi-Fi power save disabled; NetworkManager will retry reconnects forever")
+    return True
+
+
 def _write_systemd_unit(
     unit_path: Path,
     unit_name: str,

@@ -22,6 +22,7 @@ from rain_bypass.controller import run
 from rain_bypass.deploy import (
     DASHBOARD_SERVICE_NAME,
     SERVICE_NAME,
+    ensure_wifi_reliability,
     install_autoupdate,
     install_dashboard_unit,
     install_systemd_unit,
@@ -223,6 +224,7 @@ def run_install(
             install_root, python, settings_path, prompter=prompts, run_command=run_command
         )
         if is_raspberry_pi():
+            ensure_wifi_reliability(run_command=run_command)
             install_autoupdate(install_root, prompter=prompts, run_command=run_command)
 
     typer.echo("\n==> Done.")

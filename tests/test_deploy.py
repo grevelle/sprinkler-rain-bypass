@@ -12,6 +12,7 @@ from rain_bypass.deploy import (
     AUTO_UPDATE_SERVICE_NAME,
     DASHBOARD_SERVICE_NAME,
     ensure_mdns,
+    ensure_wifi_reliability,
     install_autoupdate,
     install_dashboard_unit,
     install_systemd_unit,
@@ -552,6 +553,132 @@ def test_ensure_mdns_verify_warning(monkeypatch):
     monkeypatch.setattr("rain_bypass.deploy.verify_mdns", lambda _host: False)
     monkeypatch.setattr("rain_bypass.deploy.system_hostname", lambda: "sprinkler")
     assert ensure_mdns(run_command=fake_run) is False
+
+
+def test_ensure_wifi_reliability_skips_non_posix(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "nt")
+    assert ensure_wifi_reliability() is False
+
+
+def test_ensure_wifi_reliability_skips_without_nmcli(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", lambda _name: None)
+    assert ensure_wifi_reliability() is False
+
+
+def test_ensure_wifi_reliability_missing_template(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: "/usr/bin/nmcli" if name == "nmcli" else None,
+    )
+    monkeypatch.setattr("rain_bypass.deploy.DEPLOY_DIR", tmp_path)
+    assert ensure_wifi_reliability() is False
+
+
+def test_ensure_wifi_reliability_installs(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    conf = tmp_path / "nm-99-wifi-powersave-off.conf"
+    conf.write_text("[connection]\nwifi.powersave = 2\n", encoding="utf-8")
+    monkeypatch.setattr("rain_bypass.deploy.DEPLOY_DIR", tmp_path)
+    iw_bin = tmp_path / "iw"
+    iw_bin.write_text("", encoding="utf-8")
+
+    def which(name: str) -> str | None:
+        if name == "nmcli":
+            return "/usr/bin/nmcli"
+        if name == "iw":
+            return str(iw_bin)
+        return None
+
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", which)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if list(cmd)[:3] == ["nmcli", "-t", "-f"]:
+            return CompletedProcess(
+                cmd,
+                0,
+                stdout="netplan-wlan0-xcite:802-11-wireless\nlo:loopback\n",
+            )
+        return CompletedProcess(cmd, 0, stdout="")
+
+    assert ensure_wifi_reliability(run_command=fake_run) is True
+    assert any(c[:2] == ["sudo", "tee"] for c in calls)
+    assert [
+        "sudo",
+        "nmcli",
+        "connection",
+        "modify",
+        "netplan-wlan0-xcite",
+        "802-11-wireless.powersave",
+        "2",
+    ] in calls
+    assert [
+        "sudo",
+        "nmcli",
+        "connection",
+        "modify",
+        "netplan-wlan0-xcite",
+        "connection.autoconnect-retries",
+        "0",
+    ] in calls
+    assert [str(iw_bin), "dev", "wlan0", "set", "power_save", "off"] in calls
+
+
+def test_ensure_wifi_reliability_handles_nmcli_list_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    conf = tmp_path / "nm-99-wifi-powersave-off.conf"
+    conf.write_text("[connection]\nwifi.powersave = 2\n", encoding="utf-8")
+    monkeypatch.setattr("rain_bypass.deploy.DEPLOY_DIR", tmp_path)
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: "/usr/bin/nmcli" if name == "nmcli" else None,
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if list(cmd)[:3] == ["nmcli", "-t", "-f"]:
+            return CompletedProcess(cmd, 1, stdout="")
+        return CompletedProcess(cmd, 0, stdout="")
+
+    assert ensure_wifi_reliability(run_command=fake_run) is True
+    assert not any("802-11-wireless.powersave" in c for c in calls)
+
+
+def test_ensure_wifi_reliability_decodes_bytes_stdout(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    conf = tmp_path / "nm-99-wifi-powersave-off.conf"
+    conf.write_text("[connection]\nwifi.powersave = 2\n", encoding="utf-8")
+    monkeypatch.setattr("rain_bypass.deploy.DEPLOY_DIR", tmp_path)
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: "/usr/bin/nmcli" if name == "nmcli" else None,
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if list(cmd)[:3] == ["nmcli", "-t", "-f"]:
+            return CompletedProcess(
+                cmd,
+                0,
+                stdout=b"home-wifi:wifi\n",
+            )
+        return CompletedProcess(cmd, 0, stdout="")
+
+    assert ensure_wifi_reliability(run_command=fake_run) is True
+    assert [
+        "sudo",
+        "nmcli",
+        "connection",
+        "modify",
+        "home-wifi",
+        "802-11-wireless.powersave",
+        "2",
+    ] in calls
 
 
 def test_install_dashboard_unit_skips_without_systemctl(monkeypatch, tmp_path):

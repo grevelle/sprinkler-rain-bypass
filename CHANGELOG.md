@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wi‑Fi reliability on Pi** — installer disables NetworkManager Wi‑Fi power save and sets infinite reconnect retries (`deploy/nm-99-wifi-powersave-off.conf`), so a Pi Zero W recovers after AP/router outages without a reboot.
 - **Web dashboard** — `rain-bypass serve` exposes a read-only mobile HTML page on `[web]` host/port (default port 80). Routes: `/` (cached status) and `/live` (live weather). Pi installer optionally installs `rain-bypass-dashboard.service` with `CAP_NET_BIND_SERVICE` and ensures Avahi mDNS so phones can open `http://<hostname>.local/`.
 
 ### Changed

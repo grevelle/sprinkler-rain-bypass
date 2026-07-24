@@ -38,7 +38,7 @@ cp settings.example.toml settings.toml
 | OS | Latest **Raspberry Pi OS** (keep the image updated) |
 | Prerequisites | `./install.sh` checks for **python3-venv**, **git**, and on the Pi **python3-dev** + **build-essential**; offers `sudo apt-get install` if anything is missing |
 | First install | `./install.sh` on a Zero W can take **10–20 minutes** (slow CPU + SD card) |
-| Wi‑Fi | Stable connection required for Visual Crossing; default API timeout is **45 s** |
+| Wi‑Fi | Stable connection required for Visual Crossing; default API timeout is **45 s**. Installer disables **Wi‑Fi power save** and sets infinite NetworkManager reconnect retries (Pi Zero W often needs a reboot after AP outages if power save stays on) |
 | GPIO library | **GPIO Zero** (`lgpio` backend on Bookworm+) — works on Zero W through Pi 5 |
 | Relay module | **3.3 V** logic (see Hardware below) |
 | systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
@@ -624,6 +624,7 @@ Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from b
 | `scripts/check_test_fixtures.py` | Fail CI on unreferenced conftest fixtures |
 | `scripts/check_shell_functions.py` | Fail CI on unused shell functions |
 | `deploy/*.service.in` | systemd unit templates |
+| `deploy/nm-99-wifi-powersave-off.conf` | NetworkManager drop-in: disable Wi‑Fi power save on Pi |
 
 Typer powers `rain-bypass` and `rain-bypass-install`. The package ships **`py.typed`** (PEP 561) for downstream type checkers. Code targets **Python 3.12+** syntax (PEP 695 aliases, `match`/`case`, `typing.override`); CI and the Pi runtime use the latest **3.x** (3.13 on current Pi OS).
 
