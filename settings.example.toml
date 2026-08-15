@@ -36,6 +36,9 @@ state_path = "state.json"
 fail_mode = "disable_watering"
 log_level = "INFO"
 weather_timeout_seconds = 45
+# Retries after connect/timeout/5xx (helps when the AP blips at midnight).
+weather_retries = 3
+weather_retry_backoff_seconds = 10.0
 
 [web]
 host = "0.0.0.0"

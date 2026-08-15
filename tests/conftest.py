@@ -16,7 +16,7 @@ from rain_bypass.web import build_dashboard_view
 TEST_SETTINGS_OVERRIDES = {
     "weather": {"api_key": "test-key"},
     "gpio": {"mock": True},
-    "runtime": {"weather_timeout_seconds": 15},
+    "runtime": {"weather_timeout_seconds": 15, "weather_retries": 0},
 }
 
 

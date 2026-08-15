@@ -396,7 +396,7 @@ After editing `settings.toml`, run `status` or `--once` to confirm the new logic
 | `sewer`    | `start_month/day`, `end_month/day` — hard block window (annual sewer cap)                                                                                                                                                             |
 | `weather`  | `api_key` (Visual Crossing Timeline API)                                                                                                                                                                                              |
 | `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`                                                                                                                                                                      |
-| `runtime`  | `state_path`, optional `history_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`                                                                                                                                                                     |
+| `runtime`  | `state_path`, optional `history_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`, `weather_retries`, `weather_retry_backoff_seconds`                                                                                                                                                                     |
 | `web`      | `host` (default `0.0.0.0`), `port` (default `80`) — read-only dashboard (`rain-bypass serve`)                                                                                                                                                                |
 
 

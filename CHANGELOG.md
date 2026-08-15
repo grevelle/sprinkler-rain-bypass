@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Midnight weather fetch** — Visual Crossing requests now retry with backoff on connect/timeout/5xx/429, and logs include the httpx error type (API key redacted). Survives brief Wi‑Fi/AP blips at the daily check.
+
 ### Added
 
 - **Wi‑Fi reliability on Pi** — installer disables NetworkManager Wi‑Fi power save and sets infinite reconnect retries (`deploy/nm-99-wifi-powersave-off.conf`), so a Pi Zero W recovers after AP/router outages without a reboot.

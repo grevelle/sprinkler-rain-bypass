@@ -346,6 +346,72 @@ def test_fetch_weather_connection_error(settings, monkeypatch) -> None:
         fetch_weather(settings)
 
 
+@respx.mock
+def test_fetch_weather_retries_then_succeeds(settings, monkeypatch) -> None:
+    today = date(2024, 6, 10)
+    patch_local_today(monkeypatch, today)
+    sleeps: list[float] = []
+    monkeypatch.setattr("rain_bypass.weather.time.sleep", sleeps.append)
+    retrying = settings.model_copy(
+        update={
+            "runtime": settings.runtime.model_copy(
+                update={"weather_retries": 2, "weather_retry_backoff_seconds": 1.5}
+            )
+        }
+    )
+    api_start, api_end = timeline_window(retrying)
+    url = timeline_url_for(retrying, api_start, api_end)
+    payload = {
+        "timezone": retrying.location.timezone,
+        "days": _timeline_days(
+            retrying,
+            today,
+            lookback=[0.1, 0.2, 0.3],
+            forecast=[0.0, 0.0],
+            mtd_prefix=[0.0] * 10,
+        ),
+    }
+    respx.get(url).mock(
+        side_effect=[
+            httpx.ConnectError("down"),
+            httpx.ConnectError("still down"),
+            httpx.Response(200, json=payload),
+        ]
+    )
+    snapshot = fetch_weather(retrying)
+    assert snapshot.rain_mtd >= 0.0
+    assert sleeps == [1.5, 3.0]
+
+
+@respx.mock
+def test_fetch_weather_connection_error_logs_type(settings, monkeypatch, caplog) -> None:
+    today = date(2024, 6, 10)
+    patch_local_today(monkeypatch, today)
+    api_start, api_end = timeline_window(settings)
+    url = timeline_url_for(settings, api_start, api_end)
+    respx.get(url).mock(side_effect=httpx.ConnectError("dns failed"))
+    with caplog.at_level("WARNING"), pytest.raises(WeatherError, match="request failed"):
+        fetch_weather(settings)
+    assert "type=ConnectError" in caplog.text
+    assert "dns failed" in caplog.text
+
+
+@respx.mock
+def test_fetch_weather_retries_server_error(settings, monkeypatch) -> None:
+    today = date(2024, 6, 10)
+    patch_local_today(monkeypatch, today)
+    monkeypatch.setattr("rain_bypass.weather.time.sleep", lambda _s: None)
+    retrying = settings.model_copy(
+        update={"runtime": settings.runtime.model_copy(update={"weather_retries": 1})}
+    )
+    api_start, api_end = timeline_window(retrying)
+    url = timeline_url_for(retrying, api_start, api_end)
+    respx.get(url).mock(return_value=httpx.Response(503))
+    with pytest.raises(WeatherError, match="HTTP 503"):
+        fetch_weather(retrying)
+    assert respx.calls.call_count == 2
+
+
 def test_weather_api_smoke(settings, monkeypatch) -> None:
     monkeypatch.setattr(
         "rain_bypass.weather.fetch_weather",

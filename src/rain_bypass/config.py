@@ -139,6 +139,8 @@ class Runtime(FrozenModel):
     fail_mode: FailMode = FailMode.DISABLE_WATERING
     log_level: str = "INFO"
     weather_timeout_seconds: int = Field(default=45, ge=1)
+    weather_retries: int = Field(default=3, ge=0)
+    weather_retry_backoff_seconds: float = Field(default=10.0, gt=0)
 
     @field_validator("log_level")
     @classmethod

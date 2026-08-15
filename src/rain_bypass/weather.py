@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import time
 from collections.abc import Sequence
 from datetime import date, timedelta
 from typing import cast
@@ -25,6 +27,8 @@ VISUAL_CROSSING = (
     "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
 )
 TIMELINE_BASE: dict[str, str] = {"unitGroup": "us"}
+# API keys travel in query strings; never log them if httpx embeds the URL.
+_REDACT_KEY = re.compile(r"(?i)([?&]key=)[^&\s]*")
 
 
 class TimelineDay(BaseModel):
@@ -70,6 +74,8 @@ def resolve_location(zip_code: str, api_key: str, *, timeout: int = 45) -> Locat
             "key": api_key,
         },
         timeout=timeout,
+        retries=0,
+        retry_backoff_seconds=1.0,
     )
     if payload.latitude is None or payload.longitude is None or not payload.timezone:
         raise WeatherError("visual crossing could not resolve zip code")
@@ -102,13 +108,15 @@ def fetch_weather(settings: Settings) -> WeatherSnapshot:
     lookback_start, lookback_end = event_lookback_window(settings)
     forecast = forecast_window(settings)
     loc = settings.location
-    timeout = settings.runtime.weather_timeout_seconds
+    runtime = settings.runtime
     payload = _get_timeline(
         settings,
         api_start,
         api_end,
         api_key=settings.weather.api_key,
-        timeout=timeout,
+        timeout=runtime.weather_timeout_seconds,
+        retries=runtime.weather_retries,
+        retry_backoff_seconds=runtime.weather_retry_backoff_seconds,
     )
     _log_timeline_meta(payload, settings)
     daily = _require_daily_rows(payload.days)
@@ -168,11 +176,15 @@ def _get_timeline(
     *,
     api_key: str,
     timeout: int,
+    retries: int,
+    retry_backoff_seconds: float,
 ) -> TimelineResponse:
     return _get_json(
         timeline_url_for(settings, start, end),
         params={**timeline_params(settings), "key": api_key},
         timeout=timeout,
+        retries=retries,
+        retry_backoff_seconds=retry_backoff_seconds,
     )
 
 
@@ -194,32 +206,68 @@ def _require_daily_rows(raw: object) -> list[TimelineDay]:
     return days
 
 
-def _get_json(url: str, *, params: dict[str, str], timeout: int) -> TimelineResponse:
-    try:
-        response = httpx.get(url, params=params, timeout=timeout)
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        status = exc.response.status_code
-        logger.warning("weather request failed status=%s", status)
-        if status == 401:
-            raise WeatherError("visual crossing unauthorized; check api_key") from None
-        if status == 429:
-            raise WeatherError("visual crossing rate limit exceeded") from None
-        raise WeatherError(f"visual crossing HTTP {status}") from None
-    except httpx.HTTPError:
-        logger.warning("weather request failed")
-        raise WeatherError("visual crossing request failed") from None
+def _safe_http_error_text(exc: BaseException) -> str:
+    return _REDACT_KEY.sub(r"\1[redacted]", str(exc))
 
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise WeatherError("visual crossing returned invalid JSON") from exc
-    if not isinstance(payload, dict):
-        raise WeatherError("visual crossing returned invalid JSON")
-    try:
-        return TimelineResponse.model_validate(payload)
-    except ValidationError as exc:
-        raise WeatherError("visual crossing returned invalid JSON") from exc
+
+def _retryable_status(status: int) -> bool:
+    return status == 429 or status >= 500
+
+
+def _get_json(
+    url: str,
+    *,
+    params: dict[str, str],
+    timeout: int,
+    retries: int = 0,
+    retry_backoff_seconds: float = 10.0,
+) -> TimelineResponse:
+    attempts = max(1, retries + 1)
+    for attempt in range(1, attempts + 1):
+        try:
+            response = httpx.get(url, params=params, timeout=timeout)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            logger.warning(
+                "weather request failed status=%s attempt=%s/%s",
+                status,
+                attempt,
+                attempts,
+            )
+            if status == 401:
+                raise WeatherError("visual crossing unauthorized; check api_key") from None
+            if _retryable_status(status) and attempt < attempts:
+                time.sleep(retry_backoff_seconds * attempt)
+                continue
+            if status == 429:
+                raise WeatherError("visual crossing rate limit exceeded") from None
+            raise WeatherError(f"visual crossing HTTP {status}") from None
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "weather request failed type=%s err=%s attempt=%s/%s",
+                type(exc).__name__,
+                _safe_http_error_text(exc),
+                attempt,
+                attempts,
+            )
+            if attempt < attempts:
+                time.sleep(retry_backoff_seconds * attempt)
+                continue
+            raise WeatherError("visual crossing request failed") from None
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise WeatherError("visual crossing returned invalid JSON") from exc
+        if not isinstance(payload, dict):
+            raise WeatherError("visual crossing returned invalid JSON")
+        try:
+            return TimelineResponse.model_validate(payload)
+        except ValidationError as exc:
+            raise WeatherError("visual crossing returned invalid JSON") from exc
+
+    raise WeatherError("visual crossing request failed")  # pragma: no cover
 
 
 def _log_timeline_meta(payload: TimelineResponse, settings: Settings) -> None:
