@@ -110,7 +110,10 @@ def _history_item_html(row: DashboardHistoryRow, esc: Callable[[str], str]) -> s
         f'<span class="chip chip-{esc(row.verdict_class)}">{esc(row.verdict)}</span>'
         f'<span class="history-credit">{esc(row.credit)}</span>'
         f"</div>"
+        f'<details class="history-more">'
+        f"<summary>Details</summary>"
         f'<p class="history-details">{esc(row.details)}</p>'
+        f"</details>"
         f"</div>"
         f"</li>"
     )
@@ -174,37 +177,32 @@ def render_dashboard_html(view: DashboardView) -> str:
     else:
         history_html = '<p class="empty-state">No watering history yet.</p>'
 
-    error_html = ""
+    alert_parts: list[str] = []
     if view.last_error:
-        error_html = (
+        alert_parts.append(
             f'<div class="alert alert-error" role="alert">'
             f"<strong>Last error</strong> {esc(view.last_error)}"
             f"</div>"
         )
-
-    stale_html = ""
     if view.stale_check:
-        stale_html = (
+        alert_parts.append(
             f'<div class="alert alert-warn" role="alert">'
             f"<strong>Missed check</strong> {esc(view.stale_check)}"
             f"</div>"
         )
-
-    live_note_html = ""
     if view.live_note:
-        live_note_html = (
+        alert_parts.append(
             f'<div class="alert alert-warn" role="alert">'
             f"<strong>Live weather</strong> {esc(view.live_note)}"
             f"</div>"
         )
-
-    sewer_html = ""
     if view.sewer_lockout:
-        sewer_html = (
+        alert_parts.append(
             f'<div class="alert alert-warn" role="alert">'
             f"<strong>Sewer lockout</strong> {esc(view.sewer_lockout)}"
             f"</div>"
         )
+    alerts_html = f'<div class="alert-stack">{"".join(alert_parts)}</div>' if alert_parts else ""
 
     footer_href = "/" if view.live_mode else "/live"
     footer_label = "Back to saved forecast" if view.live_mode else "Refresh live weather"
@@ -274,6 +272,8 @@ def render_dashboard_html(view: DashboardView) -> str:
     <p class="relay-short">{esc(view.relay_short)}</p>
   </section>
 
+  {alerts_html}
+
   {balance_html}
 
   <section class="card schedule-card">
@@ -282,10 +282,6 @@ def render_dashboard_html(view: DashboardView) -> str:
       <span>{esc(view.local_time)}</span>
     </div>
     <p class="next-check-value">{esc(view.next_check)}</p>
-    {sewer_html}
-    {error_html}
-    {stale_html}
-    {live_note_html}
   </section>
 
   <section class="card">

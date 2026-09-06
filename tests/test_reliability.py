@@ -218,6 +218,10 @@ def test_dashboard_renders_stale_and_live_notes(settings_path: Path, monkeypatch
     view = build_dashboard_view(settings_path, fetch_live=False)
     html = render_dashboard_html(view)
     assert "Missed check" in html
+    assert "alert-stack" in html
+    assert html.index("Missed check") < html.index("Next check")
+    schedule = html.split("schedule-card", 1)[1].split("</section>", 1)[0]
+    assert "Missed check" not in schedule
     reset_live_fetch_gate()
     build_dashboard_view(settings_path, fetch_live=True)
     limited = build_dashboard_view(settings_path, fetch_live=True)

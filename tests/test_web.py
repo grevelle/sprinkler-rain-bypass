@@ -60,14 +60,14 @@ def test_dashboard_copy_helpers() -> None:
     assert _relay_short(True) == "Hardware relay open — panel can run"
     assert _relay_short(False) == "Hardware relay closed — panel blocked"
     assert _relay_short(None) == "Relay status unknown"
-    assert _decision_short(True) == "Watering allowed until next check"
-    assert _decision_short(False) == "Watering blocked until next check"
-    assert _decision_short(None) == "Awaiting daily check"
+    assert _decision_short(True) == "Sprinklers can run tonight"
+    assert _decision_short(False) == "Sprinklers are blocked tonight"
+    assert _decision_short(None) == "Waiting on today's weather check"
     assert _updated_meta("never") == "Awaiting weather"
     assert _updated_meta("2024-07-15").startswith("Updated ")
     assert _hero_subtitle(
-        sewer_lockout=True, decision_short="Watering blocked until next check"
-    ).startswith("Seasonal")
+        sewer_lockout=True, decision_short="Sprinklers are blocked tonight"
+    ).startswith("Sewer lockout")
     assert _collapse_history_rows(()) == ()
     row = DashboardHistoryRow(
         timestamp="2024-07-15 12:00",
@@ -77,9 +77,9 @@ def test_dashboard_copy_helpers() -> None:
         details="test",
     )
     assert len(_collapse_history_rows((row, row))) == 1
-    assert _hero_subtitle(
-        sewer_lockout=False, decision_short="Watering blocked until next check"
-    ) == ("Watering blocked until next check")
+    assert _hero_subtitle(sewer_lockout=False, decision_short="Sprinklers are blocked tonight") == (
+        "Sprinklers are blocked tonight"
+    )
 
 
 def test_build_dashboard_view_uses_daily_verdict_not_projection(
@@ -102,7 +102,7 @@ def test_build_dashboard_view_uses_daily_verdict_not_projection(
     view = build_dashboard_view(settings_path)
     assert snapshot.preview.would_water is False
     assert view.verdict_label == "ALLOW"
-    assert view.hero_subtitle == "Watering allowed until next check"
+    assert view.hero_subtitle == "Sprinklers can run tonight"
 
 
 def test_build_dashboard_view_cached(settings, settings_path: Path, monkeypatch) -> None:
@@ -113,7 +113,7 @@ def test_build_dashboard_view_cached(settings, settings_path: Path, monkeypatch)
     assert view.mode_label == "Saved forecast"
     assert view.balance is not None
     assert view.balance.received
-    assert view.hero_subtitle == "Watering allowed until next check"
+    assert view.hero_subtitle == "Sprinklers can run tonight"
 
 
 def test_build_dashboard_view_balance_surplus(settings, settings_path: Path, monkeypatch) -> None:

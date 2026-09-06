@@ -454,12 +454,31 @@ body::before {
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
+.history-more {
+  margin-top: 0.35rem;
+}
+.history-more summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  list-style: none;
+}
+.history-more summary::-webkit-details-marker { display: none; }
 .history-details {
   margin: 0.32rem 0 0;
   font-size: 0.78rem;
   color: var(--muted);
   line-height: 1.45;
 }
+.alert-stack {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0 0 0.9rem;
+}
+.alert-stack .alert { margin-top: 0; }
 .alert {
   margin-top: 0.85rem;
   padding: 0.75rem 0.85rem;

@@ -9,7 +9,7 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from rain_bypass.balance import balance_display
-from rain_bypass.config import State, format_sewer_range, load_settings
+from rain_bypass.config import Settings, State, format_sewer_range, load_settings
 from rain_bypass.dashboard_html import (
     DashboardBalance,
     DashboardHistoryRow,
@@ -37,12 +37,14 @@ logger = logging.getLogger(__name__)
 
 LIVE_MIN_INTERVAL_SECONDS = 300.0
 _last_live_fetch_mono = 0.0
+_pending_live_note: str | None = None
 
 
 def reset_live_fetch_gate() -> None:
     """Clear the /live rate-limit gate (tests and rare admin use)."""
-    global _last_live_fetch_mono
+    global _last_live_fetch_mono, _pending_live_note
     _last_live_fetch_mono = 0.0
+    _pending_live_note = None
 
 
 _BIND_LOW_PORT_HINT = (
@@ -87,15 +89,15 @@ def _relay_short(allowed: bool | None) -> str:
 
 def _decision_short(watering_required: bool | None) -> str:
     if watering_required is True:
-        return "Watering allowed until next check"
+        return "Sprinklers can run tonight"
     if watering_required is False:
-        return "Watering blocked until next check"
-    return "Awaiting daily check"
+        return "Sprinklers are blocked tonight"
+    return "Waiting on today's weather check"
 
 
 def _hero_subtitle(*, sewer_lockout: bool, decision_short: str) -> str:
     if sewer_lockout:
-        return "Seasonal sewer lockout — watering blocked"
+        return "Sewer lockout — sprinklers blocked"
     return decision_short
 
 
@@ -131,13 +133,24 @@ def _build_balance(
     )
 
 
+def _stale_check_message(settings: Settings, state: State, *, now: datetime) -> str | None:
+    message = missed_check_message(settings, state, now=now)
+    if message is None:
+        return None
+    stamp = state.last_weather_update
+    if stamp is None:
+        return f"{message}. No successful check on record."
+    age = max(0.0, now.timestamp() - stamp)
+    return f"{message}. Last successful check: {format_duration(age)} ago."
+
+
 def build_dashboard_view(
     settings_path: Path | str,
     *,
     fetch_live: bool = False,
     history_limit: int = 14,
 ) -> DashboardView:
-    global _last_live_fetch_mono
+    global _last_live_fetch_mono, _pending_live_note
     settings = load_settings(settings_path)
     state = State.load(settings.runtime.state_path)
     live_note: str | None = None
@@ -152,8 +165,13 @@ def build_dashboard_view(
                 f"({remaining}s remaining) — showing saved forecast"
             )
             effective_live = False
+            _pending_live_note = live_note
         else:
             _last_live_fetch_mono = time.monotonic()
+            _pending_live_note = None
+    if (not fetch_live) and _pending_live_note:
+        live_note = _pending_live_note
+        _pending_live_note = None
     snapshot = gather_status(settings, state, fetch_live=effective_live)
     preview = snapshot.preview
     loc = settings.location
@@ -202,7 +220,7 @@ def build_dashboard_view(
         local_time=snapshot.local_time.strftime("%Y-%m-%d %H:%M %Z"),
         next_check=format_duration(snapshot.next_check_seconds),
         last_error=snapshot.state.last_error,
-        stale_check=missed_check_message(settings, snapshot.state, now=snapshot.local_time),
+        stale_check=_stale_check_message(settings, snapshot.state, now=snapshot.local_time),
         live_note=live_note,
         sewer_lockout=sewer_note,
         balance=balance,
@@ -228,6 +246,12 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
                 return
             dashboard_server = cast(DashboardHTTPServer, self.server)
             view = build_dashboard_view(dashboard_server.settings_path, fetch_live=fetch_live)
+            if fetch_live and view.live_note and not view.live_mode:
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             body = render_dashboard_html(view).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
