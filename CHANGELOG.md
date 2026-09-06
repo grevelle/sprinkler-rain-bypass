@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Sewer lockout window** — Hartland Q1 meter period is **Dec 16–Mar 15** (not Jan 16); `in_sewer_lockout` correctly handles year-wrapping ranges.
 - **Midnight weather fetch** — Visual Crossing requests now retry with backoff on connect/timeout/5xx/429, and logs include the httpx error type (API key redacted). Survives brief Wi‑Fi/AP blips at the daily check.
 - **Corrupt JSON recovery** — truncated or invalid `state.json` / history JSONL is quarantined as `*.corrupt-*` and rewritten to a clean usable file (empty valid state, or history with only good lines).
 - **Missed daily check** — service startup catch-up runs today's check immediately when it is past the scheduled time and no successful check is recorded yet; status CLI and dashboard flag a stale/missed check.
@@ -135,7 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Replaced the bash installer wizard with a **Typer** CLI (`install_cli.py`); `install.sh` is now a thin bootstrap.
 - Consolidated defaults in `settings.example.toml` via `settings_io`.
-- Dropped irrigation **season** lockout; kept **sewer-only** hard block (Jan 16–Mar 15).
+- Dropped irrigation **season** lockout; kept **sewer-only** hard block (Dec 16–Mar 15 Q1 meter period).
 
 ### Added
 

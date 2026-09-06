@@ -95,7 +95,8 @@ def test_decide_blocks_on_storm_event(settings, monkeypatch) -> None:
 
 
 def test_decide_blocks_in_dormant_month(settings, monkeypatch) -> None:
-    patch_local_today(monkeypatch, date(2024, 1, 10))
+    # Dec 1-15: outside Q1 meter lockout, but December balance target is 0.
+    patch_local_today(monkeypatch, date(2024, 12, 10))
     monkeypatch.setattr(
         "rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0, 0.0, 0.0)
     )
@@ -103,6 +104,15 @@ def test_decide_blocks_in_dormant_month(settings, monkeypatch) -> None:
     assert decision.watering_required is False
     assert decision.evaluation is not None
     assert decision.evaluation.balance_ok is False
+
+
+def test_in_sewer_lockout_same_year_window() -> None:
+    from rain_bypass.config import SewerLockout
+
+    sewer = SewerLockout(start_month=6, start_day=1, end_month=8, end_day=31)
+    assert in_sewer_lockout(sewer, date(2024, 7, 4)) is True
+    assert in_sewer_lockout(sewer, date(2024, 5, 31)) is False
+    assert in_sewer_lockout(sewer, date(2024, 9, 1)) is False
 
 
 def test_decide_blocks_on_freeze(settings, monkeypatch, caplog) -> None:
@@ -155,7 +165,10 @@ def test_state_round_trip(tmp_path) -> None:
 def test_in_sewer_lockout(settings) -> None:
     sewer = settings.sewer
     assert in_sewer_lockout(sewer, date(2024, 2, 1)) is True
-    assert in_sewer_lockout(sewer, date(2024, 1, 15)) is False
+    assert in_sewer_lockout(sewer, date(2024, 1, 15)) is True
+    assert in_sewer_lockout(sewer, date(2024, 12, 16)) is True
+    assert in_sewer_lockout(sewer, date(2024, 12, 15)) is False
+    assert in_sewer_lockout(sewer, date(2024, 3, 16)) is False
 
 
 def test_decide_sewer_lockout_blocks(settings, monkeypatch, caplog) -> None:

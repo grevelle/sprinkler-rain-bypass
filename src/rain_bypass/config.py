@@ -120,7 +120,7 @@ class Watering(FrozenModel):
 class SewerLockout(FrozenModel):
     """Hard block window — city sewer bills often use winter water use as the annual cap."""
 
-    start_month: int = Field(default=1, ge=1, le=12)
+    start_month: int = Field(default=12, ge=1, le=12)
     start_day: int = Field(default=16, ge=1, le=31)
     end_month: int = Field(default=3, ge=1, le=12)
     end_day: int = Field(default=15, ge=1, le=31)
@@ -213,7 +213,10 @@ def local_today(location: Location) -> date:
 def in_sewer_lockout(sewer: SewerLockout, today: date) -> bool:
     start = date(today.year, sewer.start_month, sewer.start_day)
     end = date(today.year, sewer.end_month, sewer.end_day)
-    return start <= today <= end
+    if start <= end:
+        return start <= today <= end
+    # Window wraps the year (e.g. Dec 16-Mar 15 meter period).
+    return today >= start or today <= end
 
 
 def format_sewer_range(sewer: SewerLockout) -> str:

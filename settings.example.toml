@@ -15,8 +15,8 @@ check_hour = 0
 check_minute = 0
 
 [sewer]
-# Hartland/Waukesha: annual sewer usage is set from Jan 16–Mar 15 water use (April bill).
-start_month = 1
+# Hartland: Q1 meter period (Dec 16–Mar 15) sets sewer volume for the year (April bill).
+start_month = 12
 start_day = 16
 end_month = 3
 end_day = 15

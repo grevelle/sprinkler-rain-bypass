@@ -404,7 +404,7 @@ After editing `settings.toml`, run `status` or `--once` to confirm the new logic
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
 
-**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** — **sewer lockout Jan 16–Mar 15**; **`balance.inches_per_cycle = 0.3`** (30 min/zone ≈ 0.3 in per daily run). Schedule Rain Bird for **one program every day**; this app sets the bypass before that cycle.
+**Suggested starting values** (used by `./install.sh`): **Hartland, WI 53029** — **sewer lockout Dec 16–Mar 15** (Q1 meter period); **`balance.inches_per_cycle = 0.3`** (30 min/zone ≈ 0.3 in per daily run). Schedule Rain Bird for **one program every day**; this app sets the bypass before that cycle.
 
 ### Rain Bird setup
 
@@ -418,7 +418,7 @@ Relay **open** (green LED) = dry sensor = watering **allowed**. Relay **closed**
 
 ### Sewer lockout
 
-Many municipalities (including Hartland/Waukesha) set **annual sewer charges from water used January 16 through March 15** (shown on April utility bills). Any irrigation on the same water meter during that window increases your sewer bill for the **entire year**.
+Hartland sets **annual sewer volume from the Q1 meter period, December 16 through March 15** (shown on April utility bills). Any irrigation on the same water meter during that window increases your sewer bill for the **entire year**.
 
 During the sewer lockout window:
 
