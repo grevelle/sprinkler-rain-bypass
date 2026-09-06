@@ -93,11 +93,13 @@ def test_balance_monthly_validator_branches():
     assert preset.monthly[5].target_inches_per_month == pytest.approx(9.0)
 
 
-def test_state_load_rejects_non_object(tmp_path: Path):
+def test_state_load_repairs_non_object(tmp_path: Path):
     path = tmp_path / "state.json"
     path.write_text("[]", encoding="utf-8")
-    with pytest.raises(ValidationError):
-        State.load(path)
+    loaded = State.load(path)
+    assert loaded == State()
+    assert path.is_file()
+    assert list(tmp_path.glob("state.json.corrupt-*"))
 
 
 def test_load_example_settings_monthly_override():

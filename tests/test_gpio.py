@@ -52,7 +52,13 @@ def test_watering_pins_requires_gpio_extra(pi_gpio) -> None:
         pass
 
 
-def test_watering_pins_pi_cleanup(fake_output_device, pi_gpio) -> None:
+def test_watering_pins_hold_state_without_cleanup(fake_output_device, pi_gpio) -> None:
     with watering_pins(pi_gpio) as driver:
         driver.apply(False)
+    assert all(not device.closed for device in fake_output_device)
+
+
+def test_pipins_cleanup_closes_devices(fake_output_device, pi_gpio) -> None:
+    driver = PiPins(pi_gpio)
+    driver.cleanup()
     assert all(device.closed for device in fake_output_device)

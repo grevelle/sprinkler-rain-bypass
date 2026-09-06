@@ -43,7 +43,7 @@ def run(
     sleep: Callable[[float], None] = time.sleep,
     seconds_until_check: Callable[[Settings], float] | None = None,
 ) -> None:
-    from rain_bypass.windows import seconds_until_next_check
+    from rain_bypass.windows import daily_check_pending, seconds_until_next_check
 
     wait = seconds_until_check or seconds_until_next_check
     migrate_legacy_irrigation(settings)
@@ -54,6 +54,10 @@ def run(
         if once:
             tick(settings, state, driver.apply)
             return
+
+        if daily_check_pending(settings, state):
+            logger.info("catching up missed daily weather check")
+            state = tick(settings, state, driver.apply)
 
         while True:
             sleep(wait(settings))

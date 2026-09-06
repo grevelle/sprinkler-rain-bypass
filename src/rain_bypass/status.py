@@ -12,7 +12,7 @@ from rain_bypass.balance import balance_display
 from rain_bypass.config import Settings, State, format_sewer_range, load_settings
 from rain_bypass.logic import preview
 from rain_bypass.models import Evaluation, Preview
-from rain_bypass.windows import local_now, seconds_until_next_check
+from rain_bypass.windows import local_now, missed_check_message, seconds_until_next_check
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +243,9 @@ def format_status(snapshot: StatusSnapshot) -> str:
     ]
     if snapshot.state.last_error:
         lines.append(_line("Last error", snapshot.state.last_error))
+    stale = missed_check_message(snapshot.settings, snapshot.state, now=snapshot.local_time)
+    if stale:
+        lines.append(_line("Check status", stale))
 
     if pv.sewer_lockout:
         sewer = settings.sewer

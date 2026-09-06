@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
@@ -9,6 +10,7 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import typer
+from pydantic import ValidationError
 
 from rain_bypass import config
 from rain_bypass.config import (
@@ -19,6 +21,9 @@ from rain_bypass.config import (
     strip_legacy_state_keys,
 )
 from rain_bypass.models import Decision, persisted_weather
+from rain_bypass.persistence import atomic_write_text, quarantine_corrupt
+
+logger = logging.getLogger(__name__)
 
 HISTORY_RETENTION = timedelta(days=365)
 
@@ -92,31 +97,57 @@ def _parse_line(line: str) -> WateringRecord | None:
     text = line.strip()
     if not text:
         return None
-    return WateringRecord.model_validate(json.loads(text))
+    try:
+        return WateringRecord.model_validate(json.loads(text))
+    except (json.JSONDecodeError, ValidationError):
+        return None
 
 
 def _load_all_records(path: Path) -> list[WateringRecord]:
     if not path.is_file():
         return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        logger.warning("history file unreadable path=%s error=%s; repairing", path, exc)
+        quarantine_corrupt(path)
+        _write_records(path, [])
+        return []
     records: list[WateringRecord] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    skipped = 0
+    for line in lines:
         record = _parse_line(line)
-        if record is not None:
-            records.append(record)
+        if record is None:
+            if line.strip():
+                skipped += 1
+            continue
+        records.append(record)
+    if skipped:
+        logger.warning(
+            "history file had %s corrupt line(s) path=%s; rewriting clean log",
+            skipped,
+            path,
+        )
+        quarantine_corrupt(path)
+        _write_records(path, records)
     return records
 
 
 def _write_records(path: Path, records: Sequence[WateringRecord]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    atomic_write_text(
+        path,
         "".join(record.model_dump_json() + "\n" for record in records),
-        encoding="utf-8",
     )
 
 
 def append_record(path: Path, record: WateringRecord, *, now: float | None = None) -> None:
     cutoff = _retention_cutoff(now=now)
-    kept = [existing for existing in _load_all_records(path) if existing.checked_at >= cutoff]
+    kept = [
+        existing
+        for existing in _load_all_records(path)
+        if existing.checked_at >= cutoff and existing.local_date != record.local_date
+    ]
     kept.append(record)
     _write_records(path, kept)
 
@@ -170,7 +201,7 @@ def _strip_legacy_irrigation_fields(state_path: Path, raw: dict[str, Any]) -> No
     if "irrigation_inches_mtd" not in raw and "balance_month" not in raw:
         return
     strip_legacy_state_keys(raw)
-    state_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(state_path, json.dumps(raw, indent=2) + "\n")
 
 
 def load_records(path: Path, *, limit: int = 30) -> list[WateringRecord]:

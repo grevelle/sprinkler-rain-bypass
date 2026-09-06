@@ -39,8 +39,14 @@ from rain_bypass.web import (
     _updated_meta,
     build_dashboard_view,
     render_dashboard_html,
+    reset_live_fetch_gate,
     run_server,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_live_rate_limit() -> None:
+    reset_live_fetch_gate()
 
 
 def test_verdict_badge_allow_block_unknown() -> None:

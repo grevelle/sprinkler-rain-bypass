@@ -10,14 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Midnight weather fetch** — Visual Crossing requests now retry with backoff on connect/timeout/5xx/429, and logs include the httpx error type (API key redacted). Survives brief Wi‑Fi/AP blips at the daily check.
+- **Corrupt JSON recovery** — truncated or invalid `state.json` / history JSONL is quarantined as `*.corrupt-*` and rewritten to a clean usable file (empty valid state, or history with only good lines).
+- **Missed daily check** — service startup catch-up runs today's check immediately when it is past the scheduled time and no successful check is recorded yet; status CLI and dashboard flag a stale/missed check.
 
 ### Added
 
+- **Atomic persistence** — `state.json` and `watering_history.jsonl` writes use temp file + replace.
+- **Same-day history dedup** — a second cycle on the same local date replaces that day's history row (avoids double-counting irrigation on `--once` retries).
+- **`/live` rate limit** — live weather fetches are limited to about once every five minutes; the dashboard notes when a fetch is skipped.
 - **Wi‑Fi reliability on Pi** — installer disables NetworkManager Wi‑Fi power save and sets infinite reconnect retries (`deploy/nm-99-wifi-powersave-off.conf`), so a Pi Zero W recovers after AP/router outages without a reboot.
 - **Web dashboard** — `rain-bypass serve` exposes a read-only mobile HTML page on `[web]` host/port (default port 80). Routes: `/` (cached status) and `/live` (live weather). Pi installer optionally installs `rain-bypass-dashboard.service` with `CAP_NET_BIND_SERVICE` and ensures Avahi mDNS so phones can open `http://<hostname>.local/`.
 
 ### Changed
 
+- **GPIO on service stop** — watering pins skip `cleanup()` so the relay holds its last level (matches documented `systemctl stop` behavior).
 - **Daily auto-update timer** moved from **12:00** to **15:00** local (`rain-bypass-auto-update.timer`).
 - **OS unattended-upgrades** — download upgradeable packages ahead of time; remove unused kernel packages; enable automatic reboot at **15:00** (aligned with the app auto-update window).
 - **Dead code** — removed unused test fixtures/mock state; added CI gates for vulture-on-tests, dashboard CSS orphans, conftest fixture references, and shell function references; pyright unused-symbol reports enabled for `src/`.

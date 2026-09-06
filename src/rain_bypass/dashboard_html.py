@@ -42,6 +42,8 @@ class DashboardView:
     local_time: str
     next_check: str
     last_error: str | None
+    stale_check: str | None
+    live_note: str | None
     sewer_lockout: str | None
     balance: DashboardBalance | None
     history_rows: tuple[DashboardHistoryRow, ...]
@@ -180,6 +182,22 @@ def render_dashboard_html(view: DashboardView) -> str:
             f"</div>"
         )
 
+    stale_html = ""
+    if view.stale_check:
+        stale_html = (
+            f'<div class="alert alert-warn" role="alert">'
+            f"<strong>Missed check</strong> {esc(view.stale_check)}"
+            f"</div>"
+        )
+
+    live_note_html = ""
+    if view.live_note:
+        live_note_html = (
+            f'<div class="alert alert-warn" role="alert">'
+            f"<strong>Live weather</strong> {esc(view.live_note)}"
+            f"</div>"
+        )
+
     sewer_html = ""
     if view.sewer_lockout:
         sewer_html = (
@@ -266,6 +284,8 @@ def render_dashboard_html(view: DashboardView) -> str:
     <p class="next-check-value">{esc(view.next_check)}</p>
     {sewer_html}
     {error_html}
+    {stale_html}
+    {live_note_html}
   </section>
 
   <section class="card">

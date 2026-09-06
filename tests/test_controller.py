@@ -116,6 +116,10 @@ def test_run_loop_waits_before_first_tick(settings, monkeypatch) -> None:
 
     monkeypatch.setattr("rain_bypass.controller.tick", counting_tick)
     monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0))
+    monkeypatch.setattr(
+        "rain_bypass.windows.daily_check_pending",
+        lambda *_a, **_k: False,
+    )
 
     def _interrupt_sleep(_seconds: float) -> None:
         raise KeyboardInterrupt
@@ -137,6 +141,10 @@ def test_run_loop_ticks_after_scheduled_sleep(settings, monkeypatch) -> None:
 
     monkeypatch.setattr("rain_bypass.controller.tick", counting_tick)
     monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0))
+    monkeypatch.setattr(
+        "rain_bypass.windows.daily_check_pending",
+        lambda *_a, **_k: False,
+    )
 
     sleeps = 0
 
@@ -223,3 +231,28 @@ def test_main_fatal_error(settings_path) -> None:
     with patch("rain_bypass.cli.run", side_effect=RuntimeError("boom")):
         result = CliRunner().invoke(app, ["--config", str(settings_path)])
         assert result.exit_code == 1
+
+
+def test_run_loop_catches_up_missed_daily_check(settings, monkeypatch) -> None:
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    tick_calls = 0
+
+    def counting_tick(*args, **kwargs):
+        nonlocal tick_calls
+        tick_calls += 1
+        return tick(*args, **kwargs)
+
+    monkeypatch.setattr("rain_bypass.controller.tick", counting_tick)
+    monkeypatch.setattr("rain_bypass.logic.fetch_weather", lambda _s: weather_snapshot(0.0))
+    monkeypatch.setattr(
+        "rain_bypass.windows.daily_check_pending",
+        lambda *_a, **_k: True,
+    )
+
+    def _interrupt_sleep(_seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run(settings, pin_factory=_noop_pins, sleep=_interrupt_sleep)
+
+    assert tick_calls == 1

@@ -70,5 +70,5 @@ def watering_pins(gpio: Gpio) -> Generator[PinDriver]:
     try:
         yield driver
     finally:
-        if cleanup:
-            cleanup()
+        # Keep last relay/LED levels across service stop (do not float pins on close).
+        _ = cleanup

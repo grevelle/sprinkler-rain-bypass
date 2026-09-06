@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,8 +31,19 @@ from rain_bypass.status import (
     format_updated,
     gather_status,
 )
+from rain_bypass.windows import missed_check_message
 
 logger = logging.getLogger(__name__)
+
+LIVE_MIN_INTERVAL_SECONDS = 300.0
+_last_live_fetch_mono = 0.0
+
+
+def reset_live_fetch_gate() -> None:
+    """Clear the /live rate-limit gate (tests and rare admin use)."""
+    global _last_live_fetch_mono
+    _last_live_fetch_mono = 0.0
+
 
 _BIND_LOW_PORT_HINT = (
     "Binding to port {port} failed ({exc}). On Linux, grant CAP_NET_BIND_SERVICE "
@@ -125,9 +137,24 @@ def build_dashboard_view(
     fetch_live: bool = False,
     history_limit: int = 14,
 ) -> DashboardView:
+    global _last_live_fetch_mono
     settings = load_settings(settings_path)
     state = State.load(settings.runtime.state_path)
-    snapshot = gather_status(settings, state, fetch_live=fetch_live)
+    live_note: str | None = None
+    effective_live = fetch_live
+    if fetch_live:
+        elapsed = time.monotonic() - _last_live_fetch_mono
+        if _last_live_fetch_mono and elapsed < LIVE_MIN_INTERVAL_SECONDS:
+            remaining = int(LIVE_MIN_INTERVAL_SECONDS - elapsed)
+            live_note = (
+                f"Live refresh limited to once per "
+                f"{int(LIVE_MIN_INTERVAL_SECONDS // 60)} min "
+                f"({remaining}s remaining) — showing saved forecast"
+            )
+            effective_live = False
+        else:
+            _last_live_fetch_mono = time.monotonic()
+    snapshot = gather_status(settings, state, fetch_live=effective_live)
     preview = snapshot.preview
     loc = settings.location
     evaluation = preview.evaluation
@@ -168,17 +195,19 @@ def build_dashboard_view(
             sewer_lockout=preview.sewer_lockout,
             decision_short=decision,
         ),
-        live_mode=fetch_live,
-        mode_label="Live weather" if fetch_live else "Saved forecast",
+        live_mode=effective_live,
+        mode_label="Live weather" if effective_live else "Saved forecast",
         location_short=loc.zip_code,
         updated_meta=_updated_meta(last_updated),
         local_time=snapshot.local_time.strftime("%Y-%m-%d %H:%M %Z"),
         next_check=format_duration(snapshot.next_check_seconds),
         last_error=snapshot.state.last_error,
+        stale_check=missed_check_message(settings, snapshot.state, now=snapshot.local_time),
+        live_note=live_note,
         sewer_lockout=sewer_note,
         balance=balance,
         history_rows=rows,
-        refresh_seconds=None if fetch_live else 60,
+        refresh_seconds=None if effective_live else 60,
     )
 
 

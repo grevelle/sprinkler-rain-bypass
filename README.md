@@ -44,7 +44,7 @@ cp settings.example.toml settings.toml
 | systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
 | Maintenance | Optional **daily auto-update** at 15:00 — `apt dist-upgrade`, `git pull`, pip, service restart (plus morning `unattended-upgrades`; see [Automatic updates](#automatic-daily-updates)) |
 
-On boot the relay **blocks watering** until the first check completes, then applies the decision from the daily check.
+On boot the relay **blocks watering** until the first check completes, then applies the decision from the daily check. If the service starts after today's check time with no successful check yet, it **runs a catch-up check immediately** before sleeping until the next scheduled time.
 
 ## Command reference
 
@@ -157,13 +157,15 @@ avahi-resolve-host-name sprinkler.local
 ```
 
 - **`/`** — cached status (auto-refreshes every 60s)
-- **`/live`** — fetches live weather (use sparingly)
+- **`/live`** — fetches live weather; rate-limited to about once every **5 minutes** (shows a note when skipped)
 
 If mDNS does not work on your phone (some Android browsers), use **`http://<pi-ip>/`** instead. The page is visible to anyone on your LAN — do not port-forward without adding auth.
 
 ### Watering history
 
-Each control cycle (`--once` or the daily check) appends one line to **`watering_history.jsonl`** next to `state.json` (or `runtime.history_path` if set). **This file is the single source of truth** for how much irrigation has been credited this month — balance decisions sum `inches_credited` from the log; `state.json` holds only relay and weather snapshot fields. Records older than one year are dropped automatically on each append. This logs the bypass **decision** and inches credited — not confirmation that Rain Bird actually ran.
+Each control cycle (`--once` or the daily check) appends one line to **`watering_history.jsonl`** next to `state.json` (or `runtime.history_path` if set). A second run the **same local calendar day** replaces that day's row (so `--once` retries do not double-count irrigation). **This file is the single source of truth** for how much irrigation has been credited this month — balance decisions sum `inches_credited` from the log; `state.json` holds only relay and weather snapshot fields. Records older than one year are dropped automatically on each append. This logs the bypass **decision** and inches credited — not confirmation that Rain Bird actually ran.
+
+Writes to `state.json` and the history file are **atomic** (temp file + replace). If either file is corrupt, the service **quarantines** it as `*.corrupt-*` and rewrites a clean file (empty valid state, or history with only good lines). Status and the dashboard flag a **missed daily check** when today's scheduled check has not completed yet.
 
 ```mermaid
 flowchart LR
@@ -593,8 +595,9 @@ Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from b
 - **`history`** — `verdict_badge` is the single ALLOW/BLOCK label tree (web hero uses `detail=False`).
 - **`weather`** — Visual Crossing Timeline API via httpx; responses validated as Pydantic `TimelineDay` before balance math.
 - **`logic`** — `decide()` runs the full control pipeline; `preview()` / `evaluate_weather()` power read-only status and web views.
-- **`controller`** — `tick()` calls `decide()`, sets GPIO, appends history, saves `state.json`; `run()` loops until the next check time.
-- **`web`** — builds `DashboardView` from status/history SSOT helpers; delegates HTML to `dashboard_html.render_dashboard_html`.
+- **`controller`** — `tick()` calls `decide()`, sets GPIO, appends history, saves `state.json`; `run()` catch-up ticks if today's check is still pending, then loops until the next check time.
+- **`persistence`** — atomic text writes and corrupt-file quarantine helpers used by state and history.
+- **`web`** — builds `DashboardView` from status/history SSOT helpers; delegates HTML to `dashboard_html.render_dashboard_html`; rate-limits `/live` weather fetches.
 - **`dashboard_html`** — dashboard DTOs (`DashboardView`, etc.) and HTML template rendering; CSS from `static/dashboard.css`.
 - **`install_cli`** — thin Typer entry point; prompts in `install_prompts`, flow in `install_flow`, shared prompters in `prompting`.
 - **`settings.example.toml`** — canonical defaults for install, tests, and `rain_bypass.config`.
@@ -613,6 +616,7 @@ Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from b
 | `tests/test_history.py` | Watering log, verdict/details helpers |
 | `tests/test_status.py` | Text status formatting |
 | `tests/test_web.py` | HTML dashboard (view + HTTP server) |
+| `tests/test_reliability.py` | Atomic writes, corrupt repair, catch-up / stale check, `/live` rate limit |
 | `tests/test_check_scripts.py` | Maintenance script smoke tests |
 | `tests/test_balance.py`, `test_config_io.py`, … | Focused unit tests |
 | `tests/conftest.py` | Shared fixtures and factories |

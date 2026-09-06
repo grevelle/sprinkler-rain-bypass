@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from collections.abc import Mapping
@@ -15,6 +16,9 @@ import tomllib
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from rain_bypass.paths import repo_root
+from rain_bypass.persistence import atomic_write_text, quarantine_corrupt
+
+logger = logging.getLogger(__name__)
 
 EXAMPLE_SETTINGS_PATH = repo_root() / "settings.example.toml"
 
@@ -177,15 +181,29 @@ class State(FrozenModel):
     def load(cls, path: Path) -> State:
         if not path.is_file():
             return cls()
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            data = cast(dict[str, Any], raw)
-            strip_legacy_state_keys(data)
-            return cls.model_validate(data)
-        return cls.model_validate(raw)
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            logger.warning("state file unreadable path=%s error=%s; repairing", path, exc)
+            quarantine_corrupt(path)
+            repaired = cls()
+            repaired.save(path)
+            return repaired
+        try:
+            if isinstance(raw, dict):
+                data = cast(dict[str, Any], raw)
+                strip_legacy_state_keys(data)
+                return cls.model_validate(data)
+            return cls.model_validate(raw)
+        except ValidationError as exc:
+            logger.warning("state file invalid path=%s error=%s; repairing", path, exc)
+            quarantine_corrupt(path)
+            repaired = cls()
+            repaired.save(path)
+            return repaired
 
     def save(self, path: Path) -> None:
-        path.write_text(self.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        atomic_write_text(path, self.model_dump_json(indent=2) + "\n")
 
 
 def local_today(location: Location) -> date:
