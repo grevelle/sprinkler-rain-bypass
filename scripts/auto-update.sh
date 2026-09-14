@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Daily maintenance: OS packages, git pull, Python deps, service restart, reboot if needed.
+# Daily maintenance: OS packages, git pull, Python deps, restart enabled services, reboot if needed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/common.sh
 source "${ROOT}/scripts/lib/common.sh"
 LOG_TAG="rain-bypass-auto-update"
-SERVICE_NAME="rain-bypass"
+SERVICES=(rain-bypass rain-bypass-dashboard)
 PYTHON="${ROOT}/.venv/bin/python"
 
 log() {
@@ -17,14 +17,22 @@ log() {
 }
 
 restart_service() {
-  if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled --quiet "${SERVICE_NAME}" 2>/dev/null; then
+  local name="$1"
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled --quiet "${name}" 2>/dev/null; then
     if [[ "$(id -u)" -eq 0 ]]; then
-      systemctl restart "${SERVICE_NAME}"
+      systemctl restart "${name}"
     else
-      sudo systemctl restart "${SERVICE_NAME}"
+      sudo systemctl restart "${name}"
     fi
-    log "Restarted ${SERVICE_NAME}"
+    log "Restarted ${name}"
   fi
+}
+
+restart_services() {
+  local name
+  for name in "${SERVICES[@]}"; do
+    restart_service "${name}"
+  done
 }
 
 run_dist_upgrade() {
@@ -85,7 +93,7 @@ if [[ -n "${before_rev}" && -n "${after_rev}" && "${before_rev}" != "${after_rev
   log "Application updated (${before_rev:0:7} -> ${after_rev:0:7})"
 fi
 
-restart_service
+restart_services
 
 if [[ -f /var/run/reboot-required ]]; then
   log "Kernel or libc update requires reboot; rebooting after app auto-update"
