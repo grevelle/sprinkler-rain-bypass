@@ -83,6 +83,26 @@ def test_build_record_weather_error(settings, monkeypatch):
     assert record.inches_credited == pytest.approx(0.0)
 
 
+def test_build_record_keep_last_does_not_credit_on_error(settings, monkeypatch):
+    """Relay may stay ALLOW under keep_last_state; irrigation MTD must not inflate."""
+    patch_local_today(monkeypatch, date(2024, 7, 15))
+    decision = Decision(
+        watering_required=True,
+        evaluation=None,
+        error="api down",
+    )
+    record = build_record(
+        settings,
+        State(watering_required=True, rainfall_inches=0.42, forecast_inches=0.1),
+        decision,
+    )
+    assert record.allowed is True
+    assert record.weather_error == "api down"
+    assert record.inches_credited == pytest.approx(0.0)
+    assert record.irrigation_mtd == pytest.approx(0.0)
+    assert record.rain_mtd == pytest.approx(0.42)
+
+
 def test_append_and_load_records(tmp_path: Path):
     path = tmp_path / "watering_history.jsonl"
     first = WateringRecord(

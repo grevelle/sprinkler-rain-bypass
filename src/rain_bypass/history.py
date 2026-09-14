@@ -70,7 +70,12 @@ def build_record(
     sewer = config.in_sewer_lockout(settings.sewer, today)
     when = checked_at if checked_at is not None else time.time()
     before_mtd = irrigation_mtd(settings, today)
-    credited = settings.balance.inches_per_cycle if decision.watering_required else 0.0
+    # Hold-relay fail modes may keep watering_required=True with an error; never credit then.
+    credited = (
+        settings.balance.inches_per_cycle
+        if decision.watering_required and decision.error is None
+        else 0.0
+    )
     after_mtd = before_mtd + credited
     evaluation = decision.evaluation
     rain_mtd, forecast_inches, _, _ = persisted_weather(decision, state_before)

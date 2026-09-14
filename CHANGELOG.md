@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Irrigation credit on weather failure** — `keep_last_state` can leave the relay ALLOW when the API fails; history no longer credits `inches_per_cycle` unless the decision has no error.
 - **Sewer lockout window** — Hartland Q1 meter period is **Dec 16–Mar 15** (not Jan 16); `in_sewer_lockout` correctly handles year-wrapping ranges.
 - **Midnight weather fetch** — Visual Crossing requests now retry with backoff on connect/timeout/5xx/429, and logs include the httpx error type (API key redacted). Survives brief Wi‑Fi/AP blips at the daily check.
 - **Corrupt JSON recovery** — truncated or invalid `state.json` / history JSONL is quarantined as `*.corrupt-*` and rewritten to a clean usable file (empty valid state, or history with only good lines).
