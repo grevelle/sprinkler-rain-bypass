@@ -870,12 +870,15 @@ def test_install_wifi_watchdog_installs(monkeypatch, tmp_path):
         calls.append(list(cmd))
         return CompletedProcess(cmd, 0, stdout="")
 
-    assert install_wifi_watchdog(
-        tmp_path,
-        run_command=fake_run,
-        prompter=FakePrompter(confirms=[True]),
-        skip_confirm=False,
-    ) is True
+    assert (
+        install_wifi_watchdog(
+            tmp_path,
+            run_command=fake_run,
+            prompter=FakePrompter(confirms=[True]),
+            skip_confirm=False,
+        )
+        is True
+    )
     assert any(
         len(cmd) >= 3
         and cmd[0] == "sudo"
