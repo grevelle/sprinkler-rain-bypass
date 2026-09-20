@@ -19,7 +19,7 @@ jobs:
       # Non-mutating lint (pre-commit --fix modifies files and fails CI if anything was dirty).
       - run: ruff check .
       - run: ruff format --check .
-      - run: shellcheck install.sh configure.sh scripts/auto-update.sh scripts/lib/common.sh scripts/check_shell_functions.sh
+      - run: shellcheck install.sh configure.sh scripts/auto-update.sh scripts/wifi-watchdog.sh scripts/lib/common.sh scripts/check_shell_functions.sh
       - run: python scripts/check_lf.py
       - run: python scripts/check_dashboard_css.py
       - run: python scripts/check_test_fixtures.py

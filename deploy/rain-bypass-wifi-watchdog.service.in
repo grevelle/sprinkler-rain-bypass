@@ -1,0 +1,9 @@
+# Template — placeholders @ROOT@ filled by rain-bypass-install.
+[Unit]
+Description=Wi-Fi watchdog for Sprinkler Rain Bypass (recover brcmfmac hangs)
+After=network.target NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=@ROOT@/scripts/wifi-watchdog.sh
+Nice=10

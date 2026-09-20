@@ -9,7 +9,7 @@ python3 -m pip install --upgrade pip
 python3 -m pip install --upgrade -e ".[dev]"
 ruff check .
 ruff format --check .
-shellcheck install.sh configure.sh scripts/auto-update.sh scripts/lib/common.sh scripts/check_shell_functions.sh
+shellcheck install.sh configure.sh scripts/auto-update.sh scripts/wifi-watchdog.sh scripts/lib/common.sh scripts/check_shell_functions.sh
 python3 scripts/check_lf.py
 python3 scripts/check_dashboard_css.py
 python3 scripts/check_test_fixtures.py

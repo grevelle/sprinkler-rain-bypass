@@ -16,7 +16,9 @@ from rain_bypass.prompting import Prompter, RunCommand, detect_service_user
 SERVICE_NAME = "rain-bypass"
 DASHBOARD_SERVICE_NAME = "rain-bypass-dashboard"
 AUTO_UPDATE_SERVICE_NAME = "rain-bypass-auto-update"
+WIFI_WATCHDOG_SERVICE_NAME = "rain-bypass-wifi-watchdog"
 DEPLOY_DIR = repo_root() / "deploy"
+JOURNALD_DROPIN_DST = Path("/etc/systemd/journald.conf.d/rain-bypass.conf")
 
 
 def _render_template(filename: str, replacements: dict[str, str]) -> str:
@@ -53,6 +55,17 @@ def render_autoupdate_service(root: Path, service_user: str) -> str:
 
 def render_autoupdate_timer() -> str:
     return _render_template("rain-bypass-auto-update.timer.in", {})
+
+
+def render_wifi_watchdog_service(root: Path) -> str:
+    return _render_template(
+        "rain-bypass-wifi-watchdog.service.in",
+        {"@ROOT@": root.as_posix()},
+    )
+
+
+def render_wifi_watchdog_timer() -> str:
+    return _render_template("rain-bypass-wifi-watchdog.timer.in", {})
 
 
 def render_dashboard_unit(root: Path, python: Path, settings: Path, service_user: str) -> str:
@@ -187,6 +200,102 @@ def ensure_wifi_reliability(*, run_command: RunCommand | None = None) -> bool:
         runner([iw, "dev", "wlan0", "set", "power_save", "off"], check=False)
 
     typer.echo("==> Wi-Fi power save disabled; NetworkManager will retry reconnects forever")
+    return True
+
+
+def ensure_persistent_journal(*, run_command: RunCommand | None = None) -> bool:
+    """Enable on-disk journald so Wi-Fi hangs / hard resets leave logs.
+
+    Returns True when the drop-in was installed.
+    """
+    if os.name != "posix":
+        return False
+    runner: RunCommand = run_command or subprocess.run
+    if shutil.which("systemctl") is None:
+        return False
+
+    conf_src = DEPLOY_DIR / "journald-rain-bypass.conf"
+    if not conf_src.is_file():
+        typer.secho(
+            "warning: journald template missing; skipping persistent journal setup.",
+            fg=typer.colors.YELLOW,
+        )
+        return False
+
+    typer.echo("==> Enabling persistent journald (capped; Pi Zero W SD-friendly)")
+    runner(["sudo", "mkdir", "-p", "/var/log/journal", "/etc/systemd/journald.conf.d"], check=True)
+    runner(
+        ["sudo", "tee", str(JOURNALD_DROPIN_DST)],
+        input=conf_src.read_bytes(),
+        check=True,
+    )
+    runner(["sudo", "systemctl", "restart", "systemd-journald"], check=True)
+    typer.echo("==> Persistent journal enabled (SystemMaxUse=50M)")
+    return True
+
+
+def install_wifi_watchdog(
+    root: Path,
+    *,
+    run_command: RunCommand | None = None,
+    skip_confirm: bool = True,
+    prompter: Prompter | None = None,
+) -> bool:
+    """Install the LAN Wi-Fi watchdog timer (soft reconnect, then reboot)."""
+    if os.name != "posix":
+        return False
+    runner: RunCommand = run_command or subprocess.run
+    if shutil.which("systemctl") is None:
+        typer.secho(
+            "warning: systemctl not found; skipping Wi-Fi watchdog.",
+            fg=typer.colors.YELLOW,
+        )
+        return False
+
+    if not skip_confirm:
+        prompts = prompter
+        if prompts is None or not prompts.confirm(
+            "Enable Wi-Fi watchdog (reconnect, then reboot if LAN stays down ~15 min)?",
+            default=True,
+        ):
+            return False
+
+    script = root / "scripts" / "wifi-watchdog.sh"
+    if not script.is_file():
+        typer.secho(
+            f"warning: {script} not found; skipping Wi-Fi watchdog.",
+            fg=typer.colors.YELLOW,
+        )
+        return False
+    os.chmod(script, 0o755)
+
+    service_path = Path(f"/etc/systemd/system/{WIFI_WATCHDOG_SERVICE_NAME}.service")
+    timer_path = Path(f"/etc/systemd/system/{WIFI_WATCHDOG_SERVICE_NAME}.timer")
+    typer.echo(f"==> Installing {service_path} and {timer_path} (requires sudo)")
+    _write_systemd_unit(
+        service_path,
+        WIFI_WATCHDOG_SERVICE_NAME,
+        render_wifi_watchdog_service(root),
+        runner=runner,
+        enable=False,
+        restart=False,
+    )
+    _write_systemd_unit(
+        timer_path,
+        f"{WIFI_WATCHDOG_SERVICE_NAME}.timer",
+        render_wifi_watchdog_timer(),
+        runner=runner,
+        enable=False,
+        restart=False,
+    )
+    runner(
+        ["sudo", "systemctl", "enable", "--now", f"{WIFI_WATCHDOG_SERVICE_NAME}.timer"],
+        check=True,
+    )
+    typer.echo(
+        f"==> Wi-Fi watchdog enabled. Status: sudo systemctl list-timers "
+        f"{WIFI_WATCHDOG_SERVICE_NAME}.timer"
+    )
     return True
 
 

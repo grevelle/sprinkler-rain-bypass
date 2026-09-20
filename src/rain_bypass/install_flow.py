@@ -22,10 +22,12 @@ from rain_bypass.controller import run
 from rain_bypass.deploy import (
     DASHBOARD_SERVICE_NAME,
     SERVICE_NAME,
+    ensure_persistent_journal,
     ensure_wifi_reliability,
     install_autoupdate,
     install_dashboard_unit,
     install_systemd_unit,
+    install_wifi_watchdog,
     system_hostname,
 )
 from rain_bypass.exceptions import WeatherError
@@ -225,6 +227,8 @@ def run_install(
         )
         if is_raspberry_pi():
             ensure_wifi_reliability(run_command=run_command)
+            ensure_persistent_journal(run_command=run_command)
+            install_wifi_watchdog(install_root, run_command=run_command)
             install_autoupdate(install_root, prompter=prompts, run_command=run_command)
 
     typer.echo("\n==> Done.")

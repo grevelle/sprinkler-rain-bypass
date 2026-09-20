@@ -38,7 +38,7 @@ cp settings.example.toml settings.toml
 | OS | Latest **Raspberry Pi OS** (keep the image updated) |
 | Prerequisites | `./install.sh` checks for **python3-venv**, **git**, and on the Pi **python3-dev** + **build-essential**; offers `sudo apt-get install` if anything is missing |
 | First install | `./install.sh` on a Zero W can take **10–20 minutes** (slow CPU + SD card) |
-| Wi‑Fi | Stable connection required for Visual Crossing; default API timeout is **45 s**. Installer disables **Wi‑Fi power save** and sets infinite NetworkManager reconnect retries (Pi Zero W often needs a reboot after AP outages if power save stays on) |
+| Wi‑Fi | Stable connection required for Visual Crossing; default API timeout is **45 s**. Installer disables **Wi‑Fi power save**, sets infinite NetworkManager reconnect retries, enables a **Wi‑Fi watchdog** (reconnect then reboot if LAN stays down ~15 min), and turns on **persistent journald** so hangs leave logs |
 | GPIO library | **GPIO Zero** (`lgpio` backend on Bookworm+) — works on Zero W through Pi 5 |
 | Relay module | **3.3 V** logic (see Hardware below) |
 | systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
@@ -62,6 +62,7 @@ flowchart LR
   rb --> serve[serve]
   install[rain-bypass-install] --> wizard[install / configure]
   install --> autoup[setup-autoupdate]
+  install --> wifiwd[setup-wifi-watchdog]
 ```
 
 Then use `.venv/bin/python -m rain_bypass …` or activate the venv so `rain-bypass` is on your PATH:
@@ -256,6 +257,17 @@ cd ~/sprinkler-rain-bypass
 sudo ./scripts/auto-update.sh
 ```
 
+### Wi‑Fi watchdog (Pi Zero W)
+
+After a `brcmfmac` hang the Pi can stay powered but drop off LAN until reboot. The installer enables a timer that checks gateway reachability every **5 minutes** (5‑minute boot grace): soft `nmcli` reconnect on the first failure, reboot after **3** consecutive failures (~15 minutes offline). Persistent journald is enabled at the same time so the next hang leaves logs.
+
+```bash
+cd ~/sprinkler-rain-bypass
+.venv/bin/python -m rain_bypass.install_cli setup-wifi-watchdog --yes
+sudo systemctl list-timers rain-bypass-wifi-watchdog.timer
+sudo journalctl -u rain-bypass-wifi-watchdog.service --since today
+```
+
 Run OS update only:
 
 ```bash
@@ -292,7 +304,7 @@ ruff check .
 ruff check --fix .
 ruff format .
 ruff format --check .
-shellcheck install.sh configure.sh scripts/auto-update.sh scripts/lib/common.sh scripts/check_shell_functions.sh
+shellcheck install.sh configure.sh scripts/auto-update.sh scripts/wifi-watchdog.sh scripts/lib/common.sh scripts/check_shell_functions.sh
 python scripts/check_lf.py
 python scripts/check_dashboard_css.py
 python scripts/check_test_fixtures.py

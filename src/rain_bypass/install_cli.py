@@ -4,7 +4,11 @@ from typing import Annotated
 
 import typer
 
-from rain_bypass.deploy import install_autoupdate
+from rain_bypass.deploy import (
+    ensure_persistent_journal,
+    install_autoupdate,
+    install_wifi_watchdog,
+)
 from rain_bypass.install_flow import (
     handle_cli_errors,
     run_configure,
@@ -61,6 +65,26 @@ def setup_autoupdate(
             skip_confirm=yes,
         )
     )
+
+
+@app.command("setup-wifi-watchdog")
+def setup_wifi_watchdog(
+    yes: Annotated[
+        bool,
+        typer.Option("-y", "--yes", help="Install without prompting."),
+    ] = False,
+) -> None:
+    """Enable persistent journal + Wi-Fi watchdog (reconnect, then reboot if LAN stays down)."""
+
+    def _run() -> None:
+        ensure_persistent_journal()
+        install_wifi_watchdog(
+            repo_root(),
+            prompter=TyperPrompter(),
+            skip_confirm=yes,
+        )
+
+    handle_cli_errors(_run)
 
 
 def main() -> None:

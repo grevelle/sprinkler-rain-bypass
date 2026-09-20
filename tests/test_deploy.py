@@ -11,16 +11,21 @@ import pytest
 from rain_bypass.deploy import (
     AUTO_UPDATE_SERVICE_NAME,
     DASHBOARD_SERVICE_NAME,
+    WIFI_WATCHDOG_SERVICE_NAME,
     ensure_mdns,
+    ensure_persistent_journal,
     ensure_wifi_reliability,
     install_autoupdate,
     install_dashboard_unit,
     install_systemd_unit,
     install_unattended_upgrades,
+    install_wifi_watchdog,
     render_autoupdate_service,
     render_autoupdate_timer,
     render_dashboard_unit,
     render_systemd_unit,
+    render_wifi_watchdog_service,
+    render_wifi_watchdog_timer,
     system_hostname,
     verify_mdns,
 )
@@ -732,3 +737,156 @@ def test_install_dashboard_unit_installs(monkeypatch, tmp_path):
         for cmd in calls
     )
     assert ["sudo", "systemctl", "enable", DASHBOARD_SERVICE_NAME] in calls
+
+
+def test_render_wifi_watchdog_service():
+    text = render_wifi_watchdog_service(Path("/opt/sprinkler-rain-bypass"))
+    assert "/opt/sprinkler-rain-bypass/scripts/wifi-watchdog.sh" in text
+    assert "@ROOT@" not in text
+
+
+def test_render_wifi_watchdog_timer():
+    text = render_wifi_watchdog_timer()
+    assert "OnBootSec=5min" in text
+    assert "OnUnitActiveSec=5min" in text
+
+
+def test_ensure_persistent_journal_skips_non_posix(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "nt")
+    assert ensure_persistent_journal() is False
+
+
+def test_ensure_persistent_journal_skips_without_systemctl(monkeypatch):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", lambda _name: None)
+    assert ensure_persistent_journal() is False
+
+
+def test_ensure_persistent_journal_missing_template(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    monkeypatch.setattr("rain_bypass.deploy.DEPLOY_DIR", tmp_path)
+    assert ensure_persistent_journal() is False
+
+
+def test_ensure_persistent_journal_installs(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    conf = tmp_path / "journald-rain-bypass.conf"
+    conf.write_text("[Journal]\nStorage=persistent\n", encoding="utf-8")
+    monkeypatch.setattr("rain_bypass.deploy.DEPLOY_DIR", tmp_path)
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return CompletedProcess(cmd, 0, stdout="")
+
+    assert ensure_persistent_journal(run_command=fake_run) is True
+    assert ["sudo", "mkdir", "-p", "/var/log/journal", "/etc/systemd/journald.conf.d"] in calls
+    assert any(c[:2] == ["sudo", "tee"] for c in calls)
+    assert ["sudo", "systemctl", "restart", "systemd-journald"] in calls
+
+
+def test_install_wifi_watchdog_skips_non_posix(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "nt")
+    assert install_wifi_watchdog(tmp_path) is False
+
+
+def test_install_wifi_watchdog_skips_without_systemctl(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    monkeypatch.setattr("rain_bypass.deploy.shutil.which", lambda _name: None)
+    assert install_wifi_watchdog(tmp_path) is False
+
+
+def test_install_wifi_watchdog_declined(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    script = tmp_path / "scripts" / "wifi-watchdog.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    assert (
+        install_wifi_watchdog(
+            tmp_path,
+            prompter=FakePrompter(confirms=[False]),
+            skip_confirm=False,
+        )
+        is False
+    )
+
+
+def test_install_wifi_watchdog_requires_prompter_when_confirming(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    assert install_wifi_watchdog(tmp_path, prompter=None, skip_confirm=False) is False
+
+
+def test_install_wifi_watchdog_missing_script(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    assert install_wifi_watchdog(tmp_path, skip_confirm=True) is False
+
+
+def test_install_wifi_watchdog_installs(monkeypatch, tmp_path):
+    monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
+    monkeypatch.setattr(
+        "rain_bypass.deploy.shutil.which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    script = tmp_path / "scripts" / "wifi-watchdog.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    (tmp_path / "deploy").mkdir()
+    # Copy watchdog unit templates into tmp DEPLOY_DIR.
+    from rain_bypass.paths import repo_root
+
+    deploy = repo_root() / "deploy"
+    for name in (
+        "rain-bypass-wifi-watchdog.service.in",
+        "rain-bypass-wifi-watchdog.timer.in",
+    ):
+        (tmp_path / "deploy" / name).write_text(
+            (deploy / name).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr("rain_bypass.deploy.DEPLOY_DIR", tmp_path / "deploy")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return CompletedProcess(cmd, 0, stdout="")
+
+    assert install_wifi_watchdog(
+        tmp_path,
+        run_command=fake_run,
+        prompter=FakePrompter(confirms=[True]),
+        skip_confirm=False,
+    ) is True
+    assert any(
+        len(cmd) >= 3
+        and cmd[0] == "sudo"
+        and cmd[1] == "tee"
+        and cmd[2].endswith(f"{WIFI_WATCHDOG_SERVICE_NAME}.service")
+        for cmd in calls
+    )
+    assert [
+        "sudo",
+        "systemctl",
+        "enable",
+        "--now",
+        f"{WIFI_WATCHDOG_SERVICE_NAME}.timer",
+    ] in calls

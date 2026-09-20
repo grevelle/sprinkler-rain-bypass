@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Persistent journald** — Pi installer enables on-disk journals (`Storage=persistent`, 50 MB cap) so Wi‑Fi hangs and hard resets leave a trail.
+- **Wi‑Fi watchdog** — `scripts/wifi-watchdog.sh` + `rain-bypass-wifi-watchdog.timer` (every 5 min after a 5 min boot grace): soft `nmcli` reconnect on first LAN failure, reboot after 3 consecutive failures (~15 min). Enable on an existing Pi with `rain-bypass-install setup-wifi-watchdog --yes`.
 - **Atomic persistence** — `state.json` and `watering_history.jsonl` writes use temp file + replace.
 - **Same-day history dedup** — a second cycle on the same local date replaces that day's history row (avoids double-counting irrigation on `--once` retries).
 - **`/live` rate limit** — live weather fetches are limited to about once every five minutes; the dashboard notes when a fetch is skipped.

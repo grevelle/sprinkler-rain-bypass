@@ -77,6 +77,7 @@ def main() -> int:
     files = [
         REPO / "install.sh",
         REPO / "scripts/auto-update.sh",
+        REPO / "scripts/wifi-watchdog.sh",
         REPO / "scripts/lib/common.sh",
     ]
     failed = False

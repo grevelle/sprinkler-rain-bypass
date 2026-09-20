@@ -660,6 +660,18 @@ def test_run_install_invokes_systemd(tmp_path, monkeypatch):
         "rain_bypass.install_flow.install_autoupdate",
         lambda *args, **kwargs: None,
     )
+    monkeypatch.setattr(
+        "rain_bypass.install_flow.ensure_wifi_reliability",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_flow.ensure_persistent_journal",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_flow.install_wifi_watchdog",
+        lambda *args, **kwargs: True,
+    )
     prompter = FakePrompter(secrets=["live-key-001"], confirms=[True, False])
     run_install(tmp_path, prompter=prompter, skip_once=True)
     assert invoked == [True]
@@ -676,6 +688,18 @@ def test_run_install_invokes_autoupdate_on_pi(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "rain_bypass.install_flow.install_dashboard_unit",
         lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_flow.ensure_wifi_reliability",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_flow.ensure_persistent_journal",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "rain_bypass.install_flow.install_wifi_watchdog",
+        lambda *args, **kwargs: True,
     )
     monkeypatch.setattr(
         "rain_bypass.install_flow.install_autoupdate",
@@ -824,6 +848,24 @@ def test_cli_setup_autoupdate(monkeypatch):
     result = CliRunner().invoke(app, ["setup-autoupdate", "--yes"])
     assert result.exit_code == 0
     assert invoked == [True]
+
+
+def test_cli_setup_wifi_watchdog(monkeypatch):
+    calls: list[str] = []
+
+    def _journal(**_kwargs):
+        calls.append("journal")
+        return True
+
+    def _watchdog(*_args, **_kwargs):
+        calls.append("watchdog")
+        return True
+
+    monkeypatch.setattr("rain_bypass.install_cli.ensure_persistent_journal", _journal)
+    monkeypatch.setattr("rain_bypass.install_cli.install_wifi_watchdog", _watchdog)
+    result = CliRunner().invoke(app, ["setup-wifi-watchdog", "--yes"])
+    assert result.exit_code == 0
+    assert calls == ["journal", "watchdog"]
 
 
 def test_run_install_skips_autoupdate_off_pi(tmp_path, monkeypatch):
