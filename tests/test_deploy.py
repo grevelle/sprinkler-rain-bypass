@@ -774,7 +774,7 @@ def test_ensure_persistent_journal_missing_template(monkeypatch, tmp_path):
 
 def test_ensure_persistent_journal_installs(monkeypatch, tmp_path):
     monkeypatch.setattr("rain_bypass.deploy.os.name", "posix")
-    conf = tmp_path / "journald-rain-bypass.conf"
+    conf = tmp_path / "99-rain-bypass-journal.conf"
     conf.write_text("[Journal]\nStorage=persistent\n", encoding="utf-8")
     monkeypatch.setattr("rain_bypass.deploy.DEPLOY_DIR", tmp_path)
     monkeypatch.setattr(
@@ -791,6 +791,7 @@ def test_ensure_persistent_journal_installs(monkeypatch, tmp_path):
     assert ["sudo", "mkdir", "-p", "/var/log/journal", "/etc/systemd/journald.conf.d"] in calls
     assert any(c[:2] == ["sudo", "tee"] for c in calls)
     assert ["sudo", "systemctl", "restart", "systemd-journald"] in calls
+    assert ["sudo", "journalctl", "--flush"] in calls
 
 
 def test_install_wifi_watchdog_skips_non_posix(monkeypatch, tmp_path):

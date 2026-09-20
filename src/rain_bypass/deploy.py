@@ -18,7 +18,7 @@ DASHBOARD_SERVICE_NAME = "rain-bypass-dashboard"
 AUTO_UPDATE_SERVICE_NAME = "rain-bypass-auto-update"
 WIFI_WATCHDOG_SERVICE_NAME = "rain-bypass-wifi-watchdog"
 DEPLOY_DIR = repo_root() / "deploy"
-JOURNALD_DROPIN_DST = Path("/etc/systemd/journald.conf.d/rain-bypass.conf")
+JOURNALD_DROPIN_DST = Path("/etc/systemd/journald.conf.d/99-rain-bypass-journal.conf")
 
 
 def _render_template(filename: str, replacements: dict[str, str]) -> str:
@@ -214,7 +214,7 @@ def ensure_persistent_journal(*, run_command: RunCommand | None = None) -> bool:
     if shutil.which("systemctl") is None:
         return False
 
-    conf_src = DEPLOY_DIR / "journald-rain-bypass.conf"
+    conf_src = DEPLOY_DIR / "99-rain-bypass-journal.conf"
     if not conf_src.is_file():
         typer.secho(
             "warning: journald template missing; skipping persistent journal setup.",
@@ -224,12 +224,19 @@ def ensure_persistent_journal(*, run_command: RunCommand | None = None) -> bool:
 
     typer.echo("==> Enabling persistent journald (capped; Pi Zero W SD-friendly)")
     runner(["sudo", "mkdir", "-p", "/var/log/journal", "/etc/systemd/journald.conf.d"], check=True)
+    # Remove older drop-in name if present from earlier installs.
+    runner(
+        ["sudo", "rm", "-f", "/etc/systemd/journald.conf.d/rain-bypass.conf"],
+        check=False,
+    )
     runner(
         ["sudo", "tee", str(JOURNALD_DROPIN_DST)],
         input=conf_src.read_bytes(),
         check=True,
     )
     runner(["sudo", "systemctl", "restart", "systemd-journald"], check=True)
+    # Move runtime journals onto the SD card (Pi OS defaults to volatile Storage).
+    runner(["sudo", "journalctl", "--flush"], check=False)
     typer.echo("==> Persistent journal enabled (SystemMaxUse=50M)")
     return True
 
