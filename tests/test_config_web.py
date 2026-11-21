@@ -79,6 +79,7 @@ def test_render_config_html_sections(settings_path: Path) -> None:
     assert "<fieldset" in html
     assert 'id="field-zip_code"' in html
     assert 'minlength="10"' not in html
+    assert 'href="/favicon.svg"' in html
     assert 'value="' in html
 
 
@@ -246,6 +247,25 @@ def test_apply_config_form_model_copy_validation(settings, monkeypatch) -> None:
     monkeypatch.setattr(type(settings), "model_copy", boom)
     with pytest.raises(ConfigError):
         apply_config_form(settings, _base_form(settings))
+
+
+def test_favicon_http(settings_path: Path) -> None:
+    port = _free_port()
+    server = DashboardHTTPServer(("127.0.0.1", port), _make_handler())
+    server.settings_path = settings_path
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for path in ("/favicon.svg", "/favicon.ico"):
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}") as response:
+                body = response.read()
+            assert response.status == 200
+            assert response.headers.get_content_type() == "image/svg+xml"
+            assert b"<svg" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_config_http_post_not_found(settings_path: Path) -> None:

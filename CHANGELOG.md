@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Web config page** — `GET/POST /config` edits day-to-day `settings.toml` fields (ZIP, API key, inches/cycle, check time, monthly targets, sewer window, forecast/event/freeze, fail mode) with the same mobile skin as status; blank API key keeps the current secret; no auth (LAN trust). GPIO/web bind/log level stay file-only.
+- **Favicon** — teal droplet SVG served at `/favicon.svg` and `/favicon.ico` for the phone UI.
 - **Persistent journald** — Pi installer enables on-disk journals (`Storage=persistent`, 50 MB cap) so Wi‑Fi hangs and hard resets leave a trail.
 - **Wi‑Fi watchdog** — `scripts/wifi-watchdog.sh` + `rain-bypass-wifi-watchdog.timer` (every 5 min after a 10 min boot grace): soft `nmcli` reconnect on each LAN failure, reboot after 6 consecutive failures (~30 min) with a 1 h cool-down. Enable on an existing Pi with `rain-bypass-install setup-wifi-watchdog --yes`.
 - **Atomic persistence** — `state.json` and `watering_history.jsonl` writes use temp file + replace.

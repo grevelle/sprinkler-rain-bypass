@@ -38,6 +38,7 @@ from rain_bypass.dashboard_html import (
     DashboardBalance,
     DashboardHistoryRow,
     DashboardView,
+    load_favicon_svg,
     render_dashboard_html,
 )
 from rain_bypass.exceptions import WeatherError
@@ -438,11 +439,23 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Length", "0")
             self.end_headers()
 
+        def _send_favicon(self) -> None:
+            body = load_favicon_svg()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             path = parsed.path
             dashboard_server = cast(DashboardHTTPServer, self.server)
             settings_path = dashboard_server.settings_path
+            if path in ("/favicon.ico", "/favicon.svg"):
+                self._send_favicon()
+                return
             if path == "/config":
                 saved = "saved" in parse_qs(parsed.query)
                 self._send_html(build_config_page(settings_path, saved=saved))

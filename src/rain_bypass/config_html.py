@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from rain_bypass.config import FailMode, Settings
-from rain_bypass.dashboard_html import load_dashboard_css
+from rain_bypass.dashboard_html import favicon_link_tags, load_dashboard_css
 
 _MONTH_LABELS = tuple(calendar.month_abbr[m] for m in range(1, 13))
 _MONTH_NAMES = tuple(calendar.month_name[m] for m in range(1, 13))
@@ -328,6 +328,7 @@ def render_config_html(
 <meta name="theme-color" content="#0d9488">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Config — Rain Bypass</title>
+{favicon_link_tags()}
 <style>
 {load_dashboard_css()}
 </style>

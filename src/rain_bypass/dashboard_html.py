@@ -61,6 +61,20 @@ def load_dashboard_css() -> str:
     return _dashboard_css_cache
 
 
+_favicon_svg_cache: bytes | None = None
+
+
+def load_favicon_svg() -> bytes:
+    global _favicon_svg_cache
+    if _favicon_svg_cache is None:
+        _favicon_svg_cache = files("rain_bypass").joinpath("static/favicon.svg").read_bytes()
+    return _favicon_svg_cache
+
+
+def favicon_link_tags() -> str:
+    return '<link rel="icon" href="/favicon.svg" type="image/svg+xml">'
+
+
 def _history_item_html(row: DashboardHistoryRow, esc: Callable[[str], str]) -> str:
     return (
         f'<li class="history-item">'
@@ -198,6 +212,7 @@ def render_dashboard_html(view: DashboardView) -> str:
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Sprinkler Rain Bypass</title>
+{favicon_link_tags()}
 <style>
 {dashboard_css}
 </style>

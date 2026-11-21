@@ -35,7 +35,7 @@ Repository = "https://github.com/grevelle/sprinkler-rain-bypass"
 where = ["src"]
 
 [tool.setuptools.package-data]
-rain_bypass = ["py.typed", "static/dashboard.css"]
+rain_bypass = ["py.typed", "static/dashboard.css", "static/favicon.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
