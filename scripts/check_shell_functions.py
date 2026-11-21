@@ -8,7 +8,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from _ci_common import REPO, shell_scripts  # noqa: E402
 
 CALLERS: dict[Path, tuple[Path, ...]] = {
     REPO / "scripts/lib/common.sh": (
@@ -74,14 +78,8 @@ def word_counts(text: str) -> Counter[str]:
 
 
 def main() -> int:
-    files = [
-        REPO / "install.sh",
-        REPO / "scripts/auto-update.sh",
-        REPO / "scripts/wifi-watchdog.sh",
-        REPO / "scripts/lib/common.sh",
-    ]
     failed = False
-    for path in files:
+    for path in shell_scripts():
         text = combined_text(path)
         counts = word_counts(text)
         for fn in function_defs(path):

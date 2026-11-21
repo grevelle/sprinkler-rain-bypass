@@ -77,6 +77,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pyright]
 include = ["src"]
+venvPath = "."
+venv = ".venv"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
 reportMissingModuleSource = false

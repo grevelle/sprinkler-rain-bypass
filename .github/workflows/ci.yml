@@ -5,26 +5,29 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@main
       - uses: actions/setup-python@main
         with:
           python-version: "3.x"
           check-latest: true
-      - run: pip install --upgrade pip
-      - run: pip install --upgrade -e ".[dev]"
-      # Non-mutating lint (pre-commit --fix modifies files and fails CI if anything was dirty).
-      - run: ruff check .
-      - run: ruff format --check .
-      - run: shellcheck install.sh configure.sh scripts/auto-update.sh scripts/wifi-watchdog.sh scripts/lib/common.sh scripts/check_shell_functions.sh
-      - run: python scripts/check_lf.py
-      - run: python scripts/check_dashboard_css.py
-      - run: python scripts/check_test_fixtures.py
-      - run: python scripts/check_shell_functions.py
-      - run: pyright
-      - run: python -m vulture src/rain_bypass vulture_whitelist.py --min-confidence 80
-      - run: python -m vulture tests vulture_tests_whitelist.py --min-confidence 80
-      - run: pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100 --tb=short
+      - name: Install package (latest deps)
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install --upgrade -e ".[dev]"
+      # Single task list — scripts/ci.py (check-only ruff; no version pins).
+      # .venv required so pyright resolves site-packages (dot-dirs are auto-excluded).
+      - name: CI checks
+        run: .venv/bin/python scripts/ci.py --skip-install

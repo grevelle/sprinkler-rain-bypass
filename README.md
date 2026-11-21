@@ -293,18 +293,20 @@ sudo systemctl disable --now apt-daily-upgrade.timer
 
 ```bash
 pip install -e ".[dev,gpio]"
-pre-commit install                        # commit: Ruff + ShellCheck; push: dead-code checks + Pyright + pytest
+pre-commit install                        # commit: Ruff + LF; push: full scripts/ci.py
 
-# Full CI locally (mirrors GitHub Actions):
-./scripts/ci.sh                           # Linux / macOS / Pi
-.\scripts\ci.ps1                          # Windows PowerShell
+# Full CI locally (mirrors GitHub Actions) — single task list:
+python scripts/ci.py                      # any OS
+./scripts/ci.sh                           # Linux / macOS / Pi wrapper
+.\scripts\ci.ps1                          # Windows PowerShell wrapper
+python scripts/ci.py --fix               # apply Ruff fixes, then re-check
 
-# Individual checks:
+# Individual checks (pytest flags live in pyproject.toml):
 ruff check .
 ruff check --fix .
 ruff format .
 ruff format --check .
-shellcheck install.sh configure.sh scripts/auto-update.sh scripts/wifi-watchdog.sh scripts/lib/common.sh scripts/check_shell_functions.sh
+shellcheck install.sh configure.sh scripts/auto-update.sh scripts/wifi-watchdog.sh scripts/lib/common.sh
 python scripts/check_lf.py
 python scripts/check_dashboard_css.py
 python scripts/check_test_fixtures.py
@@ -312,7 +314,7 @@ python scripts/check_shell_functions.py
 pyright
 python -m vulture src/rain_bypass vulture_whitelist.py --min-confidence 80
 python -m vulture tests vulture_tests_whitelist.py --min-confidence 80
-pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100
+pytest -q
 pre-commit run --all-files
 ```
 
@@ -632,7 +634,7 @@ Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from b
 | `tests/test_check_scripts.py` | Maintenance script smoke tests |
 | `tests/test_balance.py`, `test_config_io.py`, … | Focused unit tests |
 | `tests/conftest.py` | Shared fixtures and factories |
-| `scripts/ci.sh` / `ci.ps1` | Local CI gate (mirrors GitHub Actions) |
+| `scripts/ci.py` (`ci.sh` / `ci.ps1`) | Local CI gate SSOT (mirrors GitHub Actions) |
 | `scripts/lib/common.sh` | Shared shell helpers for install and auto-update |
 | `vulture_whitelist.py` | Intentional “dead code” entries for vulture CI (`src/`) |
 | `vulture_tests_whitelist.py` | Vulture false positives for pytest fixtures and markers |

@@ -8,27 +8,17 @@ alwaysApply: true
 Before you report work as **done**, **complete**, or **ready to push**, run the same checks as `.github/workflows/ci.yml`:
 
 ```bash
-# Windows
-.\scripts\ci.ps1
+# Preferred (any OS) — single task list
+python scripts/ci.py
 
-# Linux / Pi / macOS
-./scripts/ci.sh
+# Wrappers (same entrypoint):
+.\scripts\ci.ps1          # Windows
+./scripts/ci.sh           # Linux / Pi / macOS
 ```
 
-Equivalent manual steps:
+`scripts/ci.py` is the SSOT: install (unless `--skip-install`), Ruff check + format check, ShellCheck, LF/CSS/fixture/shell checks, Pyright, vulture, pytest. Pytest flags (`-m not live`, coverage) come from `pyproject.toml` — do not restate them in CI scripts.
 
-```bash
-pip install --upgrade pip
-pip install --upgrade -e ".[dev]"
-ruff check .
-ruff format --check .
-shellcheck install.sh configure.sh
-python scripts/check_lf.py
-pyright
-pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100
-```
-
-CI uses **check-only** Ruff (`ruff check`, `ruff format --check`) so a push cannot pass locally while GitHub fails because pre-commit auto-fixed files in the runner. Run `ruff check --fix && ruff format` before commit, or use pre-commit hooks locally (`pre-commit install`).
+CI uses **check-only** Ruff (`ruff check`, `ruff format --check`) so a push cannot pass locally while GitHub fails because pre-commit auto-fixed files in the runner. Run `ruff check --fix && ruff format` before commit, or use pre-commit hooks locally (`pre-commit install`). Locally, `python scripts/ci.py --fix` applies Ruff fixes then re-runs checks.
 
 ## Required workflow
 

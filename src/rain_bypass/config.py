@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import tomllib
 from collections.abc import Mapping
 from datetime import date, datetime
 from enum import StrEnum
@@ -12,7 +13,6 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import tomli_w
-import tomllib
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from rain_bypass.paths import repo_root

@@ -605,9 +605,9 @@ def test_ensure_wifi_reliability_installs(monkeypatch, tmp_path):
             return CompletedProcess(
                 cmd,
                 0,
-                stdout="netplan-wlan0-xcite:802-11-wireless\nlo:loopback\n",
+                stdout=b"netplan-wlan0-xcite:802-11-wireless\nlo:loopback\n",
             )
-        return CompletedProcess(cmd, 0, stdout="")
+        return CompletedProcess(cmd, 0, stdout=b"")
 
     assert ensure_wifi_reliability(run_command=fake_run) is True
     assert any(c[:2] == ["sudo", "tee"] for c in calls)
@@ -646,8 +646,8 @@ def test_ensure_wifi_reliability_handles_nmcli_list_failure(monkeypatch, tmp_pat
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
         if list(cmd)[:3] == ["nmcli", "-t", "-f"]:
-            return CompletedProcess(cmd, 1, stdout="")
-        return CompletedProcess(cmd, 0, stdout="")
+            return CompletedProcess(cmd, 1, stdout=b"")
+        return CompletedProcess(cmd, 0, stdout=b"")
 
     assert ensure_wifi_reliability(run_command=fake_run) is True
     assert not any("802-11-wireless.powersave" in c for c in calls)
@@ -672,7 +672,7 @@ def test_ensure_wifi_reliability_decodes_bytes_stdout(monkeypatch, tmp_path):
                 0,
                 stdout=b"home-wifi:wifi\n",
             )
-        return CompletedProcess(cmd, 0, stdout="")
+        return CompletedProcess(cmd, 0, stdout=b"")
 
     assert ensure_wifi_reliability(run_command=fake_run) is True
     assert [

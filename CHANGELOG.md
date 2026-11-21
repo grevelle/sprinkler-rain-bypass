@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Unified CI entrypoint** — `scripts/ci.py` is the single task list for GitHub Actions, pre-push, and local wrappers (`ci.sh` / `ci.ps1`); pytest coverage/markers come only from `pyproject.toml`.
+- **Deploy helpers** — shared `_sudo_tee` / `_install_service_and_timer` for journald, apt, auto-update, and Wi‑Fi watchdog unit installs.
 - **GPIO on service stop** — watering pins skip `cleanup()` so the relay holds its last level (matches documented `systemctl stop` behavior).
 - **Daily auto-update timer** moved from **12:00** to **15:00** local (`rain-bypass-auto-update.timer`).
 - **OS unattended-upgrades** — download upgradeable packages ahead of time; remove unused kernel packages; enable automatic reboot at **15:00** (aligned with the app auto-update window).

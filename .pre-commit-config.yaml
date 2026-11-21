@@ -13,56 +13,15 @@ repos:
         entry: ruff format
         language: system
         types_or: [python, pyi]
-      - id: shellcheck
-        name: shellcheck
-        entry: shellcheck
-        language: system
-        files: ^(install|configure)\.sh$|^scripts/(auto-update|wifi-watchdog)\.sh$
       - id: check-lf
         name: check LF line endings
         entry: python scripts/check_lf.py
         language: system
         pass_filenames: false
         always_run: true
-      - id: check-dashboard-css
-        name: check dashboard CSS
-        entry: python scripts/check_dashboard_css.py
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-      - id: check-test-fixtures
-        name: check test fixtures
-        entry: python scripts/check_test_fixtures.py
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-      - id: check-shell-functions
-        name: check shell functions
-        entry: python scripts/check_shell_functions.py
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-      - id: vulture-src
-        name: vulture src
-        entry: python -m vulture src/rain_bypass vulture_whitelist.py --min-confidence 80
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-      - id: vulture-tests
-        name: vulture tests
-        entry: python -m vulture tests vulture_tests_whitelist.py --min-confidence 80
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-      - id: pyright
-        name: pyright
-        entry: pyright
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-      - id: pytest
-        name: pytest
-        entry: pytest -q -m "not live" --cov=rain_bypass --cov-fail-under=100
+      - id: ci
+        name: full CI (scripts/ci.py)
+        entry: python scripts/ci.py --skip-install
         language: system
         pass_filenames: false
         stages: [pre-push]

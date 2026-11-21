@@ -128,7 +128,7 @@ def preview(settings: Settings, state: State, *, fetch_live: bool = True) -> Pre
         return _build_preview(irrigation_mtd_value=ctx.irr, sewer_lockout=True)
 
     if not fetch_live:
-        cached = state.watering_required if state.watering_required is not None else None
+        cached = state.watering_required
         saved = WeatherSnapshot.from_state(state)
         if saved is None:
             return _build_preview(irrigation_mtd_value=ctx.irr, cached_verdict=cached)

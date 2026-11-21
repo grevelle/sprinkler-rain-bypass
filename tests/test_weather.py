@@ -99,7 +99,7 @@ def test_require_daily_rows_raises(payload, match) -> None:
 
 
 def test_timeline_params(settings) -> None:
-    params = timeline_params(settings)
+    params = timeline_params()
     assert params["elements"] == "datetime,precip,tempmin"
     assert params["include"] == "days"
 
