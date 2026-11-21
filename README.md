@@ -38,7 +38,7 @@ cp settings.example.toml settings.toml
 | OS | Latest **Raspberry Pi OS** (keep the image updated) |
 | Prerequisites | `./install.sh` checks for **python3-venv**, **git**, and on the Pi **python3-dev** + **build-essential**; offers `sudo apt-get install` if anything is missing |
 | First install | `./install.sh` on a Zero W can take **10–20 minutes** (slow CPU + SD card) |
-| Wi‑Fi | Stable connection required for Visual Crossing; default API timeout is **45 s**. Installer disables **Wi‑Fi power save**, sets infinite NetworkManager reconnect retries, enables a **Wi‑Fi watchdog** (reconnect then reboot if LAN stays down ~15 min), and turns on **persistent journald** so hangs leave logs |
+| Wi‑Fi | Stable connection required for Visual Crossing; default API timeout is **45 s**. Installer disables **Wi‑Fi power save**, sets infinite NetworkManager reconnect retries, enables a **Wi‑Fi watchdog** (reconnect then reboot if LAN stays down ~30 min, with a 1 h reboot cool-down), and turns on **persistent journald** so hangs leave logs |
 | GPIO library | **GPIO Zero** (`lgpio` backend on Bookworm+) — works on Zero W through Pi 5 |
 | Relay module | **3.3 V** logic (see Hardware below) |
 | systemd | Installer sets `MemoryMax=256M` and `Nice=5` for the 512 MB Zero W |
@@ -259,7 +259,7 @@ sudo ./scripts/auto-update.sh
 
 ### Wi‑Fi watchdog (Pi Zero W)
 
-After a `brcmfmac` hang the Pi can stay powered but drop off LAN until reboot. The installer enables a timer that checks gateway reachability every **5 minutes** (5‑minute boot grace): soft `nmcli` reconnect on the first failure, reboot after **3** consecutive failures (~15 minutes offline). Persistent journald is enabled at the same time so the next hang leaves logs.
+After a `brcmfmac` hang the Pi can stay powered but drop off LAN until reboot. The installer enables a timer that checks gateway reachability every **5 minutes** (10‑minute boot grace): soft `nmcli` reconnect on each failure, reboot after **6** consecutive failures (~30 minutes offline), with a **1‑hour** cool-down so a flaky radio cannot reboot-loop. Persistent journald is enabled at the same time so the next hang leaves logs.
 
 ```bash
 cd ~/sprinkler-rain-bypass

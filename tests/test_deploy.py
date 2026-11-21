@@ -747,7 +747,7 @@ def test_render_wifi_watchdog_service():
 
 def test_render_wifi_watchdog_timer():
     text = render_wifi_watchdog_timer()
-    assert "OnBootSec=5min" in text
+    assert "OnBootSec=10min" in text
     assert "OnUnitActiveSec=5min" in text
 
 
