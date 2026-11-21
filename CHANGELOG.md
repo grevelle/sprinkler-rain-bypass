@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Dashboard UX** — tighter first viewport (cardless hero), lighter chrome, clearer type scale; soft `fetch` navigation for live/cached refresh with toast errors; JS interval replaces meta-refresh.
 - **Unified CI entrypoint** — `scripts/ci.py` is the single task list for GitHub Actions, pre-push, and local wrappers (`ci.sh` / `ci.ps1`); pytest coverage/markers come only from `pyproject.toml`.
 - **Dead wrappers** — removed unused `scripts/check_shell_functions.sh`; inlined single-use CI/logic helpers.
 - **Deploy helpers** — shared `_sudo_tee` / `_install_service_and_timer` for journald, apt, auto-update, and Wi‑Fi watchdog unit installs.

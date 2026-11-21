@@ -177,6 +177,8 @@ def test_dashboard_renders_without_optional_alerts() -> None:
         refresh_seconds=60,
     )
     html = render_dashboard_html(view)
+    assert 'data-refresh="60"' in html
+    assert 'http-equiv="refresh"' not in html
     assert "Missed check" not in html
     assert "Live weather" not in html
     assert "Last error" not in html

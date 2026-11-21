@@ -197,9 +197,11 @@ def test_render_dashboard_html_links(settings, settings_path: Path, monkeypatch)
     live = render_dashboard_html(build_dashboard_view(settings_path, fetch_live=True))
     assert 'href="/live"' in cached
     assert 'data-loading="true"' in cached
-    assert 'http-equiv="refresh"' in cached
+    assert 'data-refresh="60"' in cached
+    assert 'http-equiv="refresh"' not in cached
     assert 'href="/"' in live
-    assert 'http-equiv="refresh"' not in live
+    assert "data-refresh=" not in live
+    assert "softNavigate" in cached
     assert "Saved forecast" in cached
 
 

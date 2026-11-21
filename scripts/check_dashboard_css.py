@@ -19,6 +19,8 @@ BALANCE_PREFIXES = ("balance-", "balance-gap-")
 STATIC_ALLOW = frozenset(
     {
         "is-loading",
+        "is-visible",
+        "is-error",
         "mode-live",
         "mode-cached",
     }
