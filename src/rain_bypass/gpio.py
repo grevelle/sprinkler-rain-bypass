@@ -59,16 +59,11 @@ class PiPins(PinDriver):
 def watering_pins(gpio: Gpio) -> Generator[PinDriver]:
     if gpio.mock:
         driver: PinDriver = MockPins()
-        cleanup = None
     else:
         try:
             _import_gpiozero()
         except ImportError as exc:
             raise RuntimeError("install [gpio] extra or set gpio.mock = true") from exc
         driver = PiPins(gpio)
-        cleanup = driver.cleanup
-    try:
-        yield driver
-    finally:
-        # Keep last relay/LED levels across service stop (do not float pins on close).
-        _ = cleanup
+    # Do not close pins on exit — hold last relay/LED levels across service stop.
+    yield driver

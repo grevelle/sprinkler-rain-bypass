@@ -21,6 +21,14 @@ DEPLOY_DIR = repo_root() / "deploy"
 JOURNALD_DROPIN_DST = Path("/etc/systemd/journald.conf.d/99-rain-bypass-journal.conf")
 
 
+def _runner(run_command: RunCommand | None) -> RunCommand:
+    return run_command or subprocess.run
+
+
+def _sudo_tee(runner: RunCommand, path: Path | str, data: bytes) -> None:
+    runner(["sudo", "tee", str(path)], input=data, check=True)
+
+
 def _render_template(filename: str, replacements: dict[str, str]) -> str:
     path = DEPLOY_DIR / filename
     if not path.is_file():
@@ -112,7 +120,7 @@ def ensure_mdns(*, run_command: RunCommand | None = None) -> bool:
     """Install and enable Avahi so hostname.local resolves. Returns verification result."""
     if os.name != "posix":
         return False
-    runner: RunCommand = run_command or subprocess.run
+    runner = _runner(run_command)
     if shutil.which("apt-get") is None:
         typer.secho(
             "warning: apt-get not found; skipping mDNS setup.",
@@ -150,7 +158,7 @@ def ensure_wifi_reliability(*, run_command: RunCommand | None = None) -> bool:
     """
     if os.name != "posix":
         return False
-    runner: RunCommand = run_command or subprocess.run
+    runner = _runner(run_command)
     if shutil.which("nmcli") is None:
         return False
 
@@ -164,23 +172,16 @@ def ensure_wifi_reliability(*, run_command: RunCommand | None = None) -> bool:
         return False
 
     typer.echo("==> Disabling Wi-Fi power save (Pi reconnect reliability)")
-    runner(
-        ["sudo", "tee", str(conf_dst)],
-        input=conf_src.read_bytes(),
-        check=True,
-    )
+    _sudo_tee(runner, conf_dst, conf_src.read_bytes())
 
     listed = runner(
         ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"],
         check=False,
         capture_output=True,
-        text=True,
     )
     wifi_names: list[str] = []
     if listed.returncode == 0 and listed.stdout:
-        raw = listed.stdout
-        text = raw.decode() if isinstance(raw, bytes) else raw
-        for line in text.splitlines():
+        for line in listed.stdout.decode().splitlines():
             name, _, conn_type = line.partition(":")
             if conn_type in {"802-11-wireless", "wifi"} and name:
                 wifi_names.append(name)
@@ -210,7 +211,7 @@ def ensure_persistent_journal(*, run_command: RunCommand | None = None) -> bool:
     """
     if os.name != "posix":
         return False
-    runner: RunCommand = run_command or subprocess.run
+    runner = _runner(run_command)
     if shutil.which("systemctl") is None:
         return False
 
@@ -229,11 +230,7 @@ def ensure_persistent_journal(*, run_command: RunCommand | None = None) -> bool:
         ["sudo", "rm", "-f", "/etc/systemd/journald.conf.d/rain-bypass.conf"],
         check=False,
     )
-    runner(
-        ["sudo", "tee", str(JOURNALD_DROPIN_DST)],
-        input=conf_src.read_bytes(),
-        check=True,
-    )
+    _sudo_tee(runner, JOURNALD_DROPIN_DST, conf_src.read_bytes())
     runner(["sudo", "systemctl", "restart", "systemd-journald"], check=True)
     # Move runtime journals onto the SD card (Pi OS defaults to volatile Storage).
     runner(["sudo", "journalctl", "--flush"], check=False)
@@ -251,7 +248,7 @@ def install_wifi_watchdog(
     """Install the LAN Wi-Fi watchdog timer (soft reconnect, then reboot)."""
     if os.name != "posix":
         return False
-    runner: RunCommand = run_command or subprocess.run
+    runner = _runner(run_command)
     if shutil.which("systemctl") is None:
         typer.secho(
             "warning: systemctl not found; skipping Wi-Fi watchdog.",
@@ -276,28 +273,11 @@ def install_wifi_watchdog(
         return False
     os.chmod(script, 0o755)
 
-    service_path = Path(f"/etc/systemd/system/{WIFI_WATCHDOG_SERVICE_NAME}.service")
-    timer_path = Path(f"/etc/systemd/system/{WIFI_WATCHDOG_SERVICE_NAME}.timer")
-    typer.echo(f"==> Installing {service_path} and {timer_path} (requires sudo)")
-    _write_systemd_unit(
-        service_path,
-        WIFI_WATCHDOG_SERVICE_NAME,
-        render_wifi_watchdog_service(root),
+    _install_service_and_timer(
         runner=runner,
-        enable=False,
-        restart=False,
-    )
-    _write_systemd_unit(
-        timer_path,
-        f"{WIFI_WATCHDOG_SERVICE_NAME}.timer",
-        render_wifi_watchdog_timer(),
-        runner=runner,
-        enable=False,
-        restart=False,
-    )
-    runner(
-        ["sudo", "systemctl", "enable", "--now", f"{WIFI_WATCHDOG_SERVICE_NAME}.timer"],
-        check=True,
+        service_name=WIFI_WATCHDOG_SERVICE_NAME,
+        service_content=render_wifi_watchdog_service(root),
+        timer_content=render_wifi_watchdog_timer(),
     )
     typer.echo(
         f"==> Wi-Fi watchdog enabled. Status: sudo systemctl list-timers "
@@ -316,16 +296,41 @@ def _write_systemd_unit(
     restart: bool = True,
 ) -> None:
     typer.echo(f"==> Installing {unit_path} (requires sudo)")
-    runner(
-        ["sudo", "tee", str(unit_path)],
-        input=unit_content.encode(),
-        check=True,
-    )
+    _sudo_tee(runner, unit_path, unit_content.encode())
     runner(["sudo", "systemctl", "daemon-reload"], check=True)
     if enable:
         runner(["sudo", "systemctl", "enable", unit_name], check=True)
     if restart:
         runner(["sudo", "systemctl", "restart", unit_name], check=True)
+
+
+def _install_service_and_timer(
+    *,
+    runner: RunCommand,
+    service_name: str,
+    service_content: str,
+    timer_content: str,
+) -> None:
+    service_path = Path(f"/etc/systemd/system/{service_name}.service")
+    timer_path = Path(f"/etc/systemd/system/{service_name}.timer")
+    typer.echo(f"==> Installing {service_path} and {timer_path} (requires sudo)")
+    _write_systemd_unit(
+        service_path,
+        service_name,
+        service_content,
+        runner=runner,
+        enable=False,
+        restart=False,
+    )
+    _write_systemd_unit(
+        timer_path,
+        f"{service_name}.timer",
+        timer_content,
+        runner=runner,
+        enable=False,
+        restart=False,
+    )
+    runner(["sudo", "systemctl", "enable", "--now", f"{service_name}.timer"], check=True)
 
 
 def _install_unit_if_confirmed(
@@ -370,7 +375,7 @@ def install_dashboard_unit(
     prompter: Prompter,
     run_command: RunCommand | None = None,
 ) -> None:
-    runner: RunCommand = run_command or subprocess.run
+    runner = _runner(run_command)
 
     def _post_mdns() -> None:
         ensure_mdns(run_command=runner)
@@ -393,7 +398,7 @@ def install_dashboard_unit(
 
 def install_unattended_upgrades(*, run_command: RunCommand | None = None) -> None:
     """Enable Debian/Raspbian unattended-upgrades (apt-daily / apt-daily-upgrade timers)."""
-    runner: RunCommand = run_command or subprocess.run
+    runner = _runner(run_command)
     if shutil.which("apt-get") is None:
         typer.secho(
             "warning: apt-get not found; skipping unattended-upgrades.",
@@ -416,15 +421,11 @@ def install_unattended_upgrades(*, run_command: RunCommand | None = None) -> Non
         ["sudo", "apt-get", "install", "-y", "-qq", "unattended-upgrades"],
         check=True,
     )
-    runner(
-        ["sudo", "tee", "/etc/apt/apt.conf.d/20auto-upgrades"],
-        input=auto_conf.read_bytes(),
-        check=True,
-    )
-    runner(
-        ["sudo", "tee", "/etc/apt/apt.conf.d/51unattended-upgrades-rain-bypass"],
-        input=local_conf.read_bytes(),
-        check=True,
+    _sudo_tee(runner, "/etc/apt/apt.conf.d/20auto-upgrades", auto_conf.read_bytes())
+    _sudo_tee(
+        runner,
+        "/etc/apt/apt.conf.d/51unattended-upgrades-rain-bypass",
+        local_conf.read_bytes(),
     )
     if shutil.which("systemctl") is not None:
         runner(["sudo", "systemctl", "enable", "--now", "apt-daily.timer"], check=False)
@@ -442,7 +443,7 @@ def install_autoupdate(
     run_command: RunCommand | None = None,
     skip_confirm: bool = False,
 ) -> None:
-    runner: RunCommand = run_command or subprocess.run
+    runner = _runner(run_command)
     if shutil.which("systemctl") is None:
         typer.secho(
             "warning: systemctl not found; skipping auto-update timer.", fg=typer.colors.YELLOW
@@ -467,27 +468,11 @@ def install_autoupdate(
     install_unattended_upgrades(run_command=runner)
 
     service_user = detect_service_user(run_command=runner)
-
-    service_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.service")
-    timer_path = Path(f"/etc/systemd/system/{AUTO_UPDATE_SERVICE_NAME}.timer")
-    typer.echo(f"==> Installing {service_path} and {timer_path} (requires sudo)")
-    _write_systemd_unit(
-        service_path,
-        AUTO_UPDATE_SERVICE_NAME,
-        render_autoupdate_service(root, service_user),
+    _install_service_and_timer(
         runner=runner,
-        restart=False,
-    )
-    _write_systemd_unit(
-        timer_path,
-        f"{AUTO_UPDATE_SERVICE_NAME}.timer",
-        render_autoupdate_timer(),
-        runner=runner,
-        enable=False,
-        restart=False,
-    )
-    runner(
-        ["sudo", "systemctl", "enable", "--now", f"{AUTO_UPDATE_SERVICE_NAME}.timer"], check=True
+        service_name=AUTO_UPDATE_SERVICE_NAME,
+        service_content=render_autoupdate_service(root, service_user),
+        timer_content=render_autoupdate_timer(),
     )
     typer.echo(
         f"==> Auto-update enabled. Status: sudo systemctl list-timers "
@@ -503,7 +488,7 @@ def install_systemd_unit(
     prompter: Prompter,
     run_command: RunCommand | None = None,
 ) -> None:
-    runner: RunCommand = run_command or subprocess.run
+    runner = _runner(run_command)
     _install_unit_if_confirmed(
         unit_name=SERVICE_NAME,
         unit_filename=f"{SERVICE_NAME}.service",

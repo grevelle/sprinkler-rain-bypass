@@ -49,7 +49,7 @@ class TimelineResponse(BaseModel):
     query_cost: int | None = Field(default=None, alias="queryCost")
 
 
-def timeline_params(settings: Settings) -> dict[str, str]:
+def timeline_params() -> dict[str, str]:
     return {
         **TIMELINE_BASE,
         "elements": "datetime,precip,tempmin",
@@ -88,7 +88,7 @@ def resolve_location(zip_code: str, api_key: str, *, timeout: int = 45) -> Locat
 
 
 def timeline_request_params(settings: Settings) -> dict[str, str]:
-    return {"key": settings.weather.api_key, **timeline_params(settings)}
+    return {"key": settings.weather.api_key, **timeline_params()}
 
 
 def weather_api_smoke(settings: Settings) -> str:
@@ -181,7 +181,7 @@ def _get_timeline(
 ) -> TimelineResponse:
     return _get_json(
         timeline_url_for(settings, start, end),
-        params={**timeline_params(settings), "key": api_key},
+        params={**timeline_params(), "key": api_key},
         timeout=timeout,
         retries=retries,
         retry_backoff_seconds=retry_backoff_seconds,
