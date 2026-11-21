@@ -54,9 +54,13 @@ _BIND_LOW_PORT_HINT = (
 
 
 def _history_row(record: WateringRecord, timezone: str) -> DashboardHistoryRow:
-    when = datetime.fromtimestamp(record.checked_at, ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M")
+    when = (
+        datetime.fromtimestamp(record.checked_at, ZoneInfo(timezone))
+        .strftime("%b %d")
+        .replace(" 0", " ")
+    )
     verdict, verdict_class = watering_verdict(record)
-    credit = f"+{record.inches_credited:.2f} in"
+    credit = f"+{record.inches_credited:.2f} in" if record.inches_credited else "—"
     return DashboardHistoryRow(
         timestamp=when,
         verdict=verdict,
@@ -104,6 +108,8 @@ def _hero_subtitle(*, sewer_lockout: bool, decision_short: str) -> str:
 def _updated_meta(last_updated: str) -> str:
     if last_updated == "never":
         return "Awaiting weather"
+    if "(" in last_updated and last_updated.endswith("ago)"):
+        return last_updated.rsplit("(", 1)[-1].rstrip(")")
     return f"Updated {last_updated}"
 
 
@@ -127,7 +133,6 @@ def _build_balance(
         forecast=format_inches(summary.forecast),
         forecast_label=f"Forecast credit ({forecast_days} days)",
         deficit_amount=format_inches(abs(summary.deficit) if summary.deficit != 0 else 0.0),
-        deficit_note=summary.deficit_note,
         deficit_class=summary.deficit_class,
         progress_pct=summary.progress_pct,
     )
@@ -148,7 +153,7 @@ def build_dashboard_view(
     settings_path: Path | str,
     *,
     fetch_live: bool = False,
-    history_limit: int = 14,
+    history_limit: int = 7,
 ) -> DashboardView:
     global _last_live_fetch_mono, _pending_live_note
     settings = load_settings(settings_path)
@@ -217,7 +222,7 @@ def build_dashboard_view(
         mode_label="Live weather" if effective_live else "Saved forecast",
         location_short=loc.zip_code,
         updated_meta=_updated_meta(last_updated),
-        local_time=snapshot.local_time.strftime("%Y-%m-%d %H:%M %Z"),
+        local_time=snapshot.local_time.strftime("%H:%M %Z"),
         next_check=format_duration(snapshot.next_check_seconds),
         last_error=snapshot.state.last_error,
         stale_check=_stale_check_message(settings, snapshot.state, now=snapshot.local_time),

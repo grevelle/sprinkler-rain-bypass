@@ -64,6 +64,7 @@ def test_dashboard_copy_helpers() -> None:
     assert _decision_short(False) == "Sprinklers are blocked tonight"
     assert _decision_short(None) == "Waiting on today's weather check"
     assert _updated_meta("never") == "Awaiting weather"
+    assert _updated_meta("2024-07-15 12:00 CDT (2h ago)") == "2h ago"
     assert _updated_meta("2024-07-15").startswith("Updated ")
     assert _hero_subtitle(
         sewer_lockout=True, decision_short="Sprinklers are blocked tonight"
@@ -221,8 +222,9 @@ def test_render_dashboard_html_updated_pill(settings, settings_path: Path, monke
     snapshot = status_snapshot(settings, preview_obj=preview, state=state)
     mock_gather_status(monkeypatch, snapshot)
     html_text = render_dashboard_html(build_dashboard_view(settings_path))
-    assert "Updated " in html_text
+    assert "ago" in html_text
     assert "Awaiting weather" not in html_text
+    assert "Updated " not in html_text
 
 
 def _free_port() -> int:
@@ -288,9 +290,9 @@ def test_render_with_history_rows(settings, settings_path: Path, monkeypatch) ->
     assert "+0.30 in" in html_text
     assert "Irrigation credited" in html_text
     assert "Water budget" in html_text
-    assert "balance-stat-icon" in html_text
-    assert "balance-headline" not in html_text
-    assert "next-check-value" in html_text
+    assert "balance-headline" in html_text
+    assert "meta-strip" in html_text
+    assert "balance-stat-icon" not in html_text
 
 
 def test_history_collapse_duplicate_timestamp(settings, settings_path: Path, monkeypatch) -> None:

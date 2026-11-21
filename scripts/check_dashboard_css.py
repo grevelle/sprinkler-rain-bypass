@@ -23,6 +23,9 @@ STATIC_ALLOW = frozenset(
         "is-error",
         "mode-live",
         "mode-cached",
+        "balance-pace-need",
+        "balance-pace-surplus",
+        "balance-pace-even",
     }
 )
 
@@ -67,10 +70,12 @@ def html_class_tokens(html: str) -> set[str]:
 
 def main() -> int:
     css = CSS_PATH.read_text(encoding="utf-8")
+    # @import URLs contain dots that look like class selectors to a naive scan.
+    css_for_classes = re.sub(r"@import\s+url\([^)]+\)\s*;", "", css)
     html = HTML_PATH.read_text(encoding="utf-8")
 
     referenced = html_class_tokens(html) | python_class_tokens(HTML_PATH) | dynamic_allowlist()
-    defined = css_classes(css)
+    defined = css_classes(css_for_classes)
     orphan_classes = sorted(cls for cls in defined if cls not in referenced)
 
     defined_vars = set(CSS_VAR_DEF_RE.findall(css))

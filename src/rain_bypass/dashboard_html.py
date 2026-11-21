@@ -24,7 +24,6 @@ class DashboardBalance:
     forecast: str
     forecast_label: str
     deficit_amount: str
-    deficit_note: str
     deficit_class: str
     progress_pct: int
 
@@ -50,25 +49,6 @@ class DashboardView:
     refresh_seconds: int | None
 
 
-_RAIN_STAT_ICON = (
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
-    '<path d="M20 16.2A4.5 4.5 0 0 0 17.5 8h-.3A6 6 0 1 0 6 16.2"/>'
-    '<path d="M8 19v2M12 19v2M16 19v2"/>'
-    "</svg>"
-)
-_IRRIGATION_STAT_ICON = (
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
-    '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>'
-    "</svg>"
-)
-_RECEIVED_STAT_ICON = (
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
-    '<path d="M12 2L2 7l10 5 10-5-10-5z"/>'
-    '<path d="M2 17l10 5 10-5"/>'
-    '<path d="M2 12l10 5 10-5"/>'
-    "</svg>"
-)
-
 _dashboard_css_cache: str | None = None
 
 
@@ -81,75 +61,56 @@ def _load_dashboard_css() -> str:
     return _dashboard_css_cache
 
 
-def _balance_stat_html(
-    label: str,
-    value: str,
-    icon: str,
-    esc: Callable[[str], str],
-    *,
-    extra_class: str = "",
-) -> str:
-    stat_class = f"balance-stat {extra_class}".strip()
-    return f"""
-      <div class="{stat_class}">
-        <span class="balance-stat-icon" aria-hidden="true">{icon}</span>
-        <span class="balance-stat-label">{esc(label)}</span>
-        <span class="balance-stat-value">{esc(value)}</span>
-      </div>"""
-
-
 def _history_item_html(row: DashboardHistoryRow, esc: Callable[[str], str]) -> str:
     return (
         f'<li class="history-item">'
-        f'<div class="history-track" aria-hidden="true">'
-        f'<span class="history-dot dot-{esc(row.verdict_class)}"></span>'
-        f"</div>"
-        f'<div class="history-body">'
-        f'<div class="history-top">'
+        f'<span class="history-dot dot-{esc(row.verdict_class)}" aria-hidden="true"></span>'
+        f'<div class="history-main">'
         f'<time class="history-time">{esc(row.timestamp)}</time>'
-        f'<span class="chip chip-{esc(row.verdict_class)}">{esc(row.verdict)}</span>'
-        f'<span class="history-credit">{esc(row.credit)}</span>'
-        f"</div>"
         f'<details class="history-more">'
-        f"<summary>Details</summary>"
+        f'<summary aria-label="Details for {esc(row.timestamp)}">Why</summary>'
         f'<p class="history-details">{esc(row.details)}</p>'
         f"</details>"
         f"</div>"
+        f'<span class="chip chip-{esc(row.verdict_class)}">{esc(row.verdict)}</span>'
+        f'<span class="history-credit">{esc(row.credit)}</span>'
         f"</li>"
     )
 
 
 def _balance_card_html(balance: DashboardBalance, esc: Callable[[str], str]) -> str:
+    pace = {
+        "need": "Behind pace",
+        "surplus": "Ahead of pace",
+        "even": "On pace",
+    }[balance.deficit_class]
     gap_label = {
-        "need": "Gap to allow cycle",
-        "surplus": "Over target pace",
-        "even": "Balance gap",
+        "need": "Still need",
+        "surplus": "Ahead by",
+        "even": "Gap",
     }[balance.deficit_class]
     return f"""
   <section class="card balance-card">
     <div class="section-head">
       <h2>Water budget</h2>
-      <span>Target {esc(balance.target)}</span>
+      <span class="balance-pace balance-pace-{esc(balance.deficit_class)}">{esc(pace)}</span>
     </div>
+    <p class="balance-headline">
+      <span class="balance-received">{esc(balance.received)}</span>
+      <span class="balance-of">of</span>
+      <span class="balance-target">{esc(balance.target)}</span>
+    </p>
     <div class="balance-track" role="progressbar"
          aria-valuenow="{balance.progress_pct}" aria-valuemin="0" aria-valuemax="100"
          aria-label="Water received toward monthly target pace">
       <div class="balance-fill balance-{esc(balance.deficit_class)}"
            style="width:{balance.progress_pct}%"></div>
     </div>
-    <div class="balance-stats">
-{_balance_stat_html("Rain", balance.rain, _RAIN_STAT_ICON, esc)}
-{_balance_stat_html("Irrigation", balance.irrigation, _IRRIGATION_STAT_ICON, esc)}
-{
-        _balance_stat_html(
-            "Received",
-            balance.received,
-            _RECEIVED_STAT_ICON,
-            esc,
-            extra_class="balance-stat-total",
-        )
-    }
-    </div>
+    <p class="balance-split">
+      Rain {esc(balance.rain)}
+      <span aria-hidden="true">·</span>
+      Irrigation {esc(balance.irrigation)}
+    </p>
     <div class="balance-foot">
       <div class="balance-foot-row">
         <span class="balance-foot-label">{esc(balance.forecast_label)}</span>
@@ -159,7 +120,6 @@ def _balance_card_html(balance: DashboardBalance, esc: Callable[[str], str]) -> 
         <span class="balance-foot-label">{esc(gap_label)}</span>
         <span class="balance-foot-value">{esc(balance.deficit_amount)}</span>
       </div>
-      <p class="balance-note">{esc(balance.deficit_note)}</p>
     </div>
   </section>"""
 
@@ -273,20 +233,23 @@ def render_dashboard_html(view: DashboardView) -> str:
 
   {alerts_html}
 
+  <div class="meta-strip" aria-label="Schedule">
+    <div class="meta-strip-item">
+      <span class="meta-strip-label">Next check</span>
+      <span class="meta-strip-value">{esc(view.next_check)}</span>
+    </div>
+    <div class="meta-strip-item meta-strip-item-end">
+      <span class="meta-strip-label">Local</span>
+      <span class="meta-strip-value meta-strip-time">{esc(view.local_time)}</span>
+    </div>
+  </div>
+
   {balance_html}
 
-  <section class="card schedule-card">
-    <div class="section-head">
-      <h2>Next check</h2>
-      <span>{esc(view.local_time)}</span>
-    </div>
-    <p class="next-check-value">{esc(view.next_check)}</p>
-  </section>
-
-  <section class="card">
+  <section class="card history-card">
     <div class="section-head">
       <h2>Recent history</h2>
-      <span>{len(view.history_rows)} events</span>
+      <span>{len(view.history_rows)} days</span>
     </div>
     {history_html}
   </section>

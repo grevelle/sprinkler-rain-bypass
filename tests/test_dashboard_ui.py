@@ -102,4 +102,4 @@ def test_history_details_are_collapsed(settings, settings_path: Path, monkeypatc
     )
     html = render_dashboard_html(build_dashboard_view(settings_path))
     assert "history-more" in html
-    assert "<summary>Details</summary>" in html
+    assert ">Why</summary>" in html
