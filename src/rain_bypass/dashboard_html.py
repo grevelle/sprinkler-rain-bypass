@@ -167,9 +167,9 @@ def _balance_card_html(balance: DashboardBalance, esc: Callable[[str], str]) -> 
 def render_dashboard_html(view: DashboardView) -> str:
     esc = html.escape
     mode_class = "mode-live" if view.live_mode else "mode-cached"
-    refresh_meta = ""
+    refresh_attr = ""
     if view.refresh_seconds is not None:
-        refresh_meta = f'<meta http-equiv="refresh" content="{view.refresh_seconds}">'
+        refresh_attr = f' data-refresh="{view.refresh_seconds}"'
 
     if view.history_rows:
         items = "".join(_history_item_html(row, esc) for row in view.history_rows)
@@ -237,13 +237,12 @@ def render_dashboard_html(view: DashboardView) -> str:
 <meta name="theme-color" content="#0d9488">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-{refresh_meta}
 <title>Sprinkler Rain Bypass</title>
 <style>
 {dashboard_css}
 </style>
 </head>
-<body>
+<body{refresh_attr}>
 <div class="wrap">
   <header class="topbar">
     <div class="brand">
@@ -259,7 +258,7 @@ def render_dashboard_html(view: DashboardView) -> str:
     </div>
   </header>
 
-  <section class="card hero hero-{esc(view.verdict_class)}" aria-labelledby="verdict-label">
+  <section class="hero hero-{esc(view.verdict_class)}" aria-labelledby="verdict-label">
     <div class="status-stage">
       <div class="status-glow status-ring-{esc(view.verdict_class)}" aria-hidden="true"></div>
       <div class="status-ring status-ring-{esc(view.verdict_class)}"
@@ -293,6 +292,8 @@ def render_dashboard_html(view: DashboardView) -> str:
   </section>
 </div>
 
+<div class="ux-toast" id="ux-toast" role="status" aria-live="polite" hidden></div>
+
 <footer>
   <div class="footer-inner">
     <a class="footer-btn" href="{footer_href}" data-loading="{footer_loading}">
@@ -302,13 +303,65 @@ def render_dashboard_html(view: DashboardView) -> str:
 </footer>
 <script>
 (function () {{
-  var btn = document.querySelector('.footer-btn[data-loading="true"]');
-  if (!btn) return;
-  btn.addEventListener('click', function () {{
-    btn.classList.add('is-loading');
-    btn.setAttribute('aria-busy', 'true');
-    btn.innerHTML = '<span>↻</span>Fetching weather…';
-  }});
+  var toast = document.getElementById('ux-toast');
+  var toastTimer = null;
+
+  function showToast(message, isError) {{
+    if (!toast) return;
+    toast.textContent = message;
+    toast.hidden = false;
+    toast.classList.toggle('is-error', !!isError);
+    toast.classList.add('is-visible');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {{
+      toast.classList.remove('is-visible');
+    }}, 4200);
+  }}
+
+  function softNavigate(url, loadingLabel) {{
+    var btn = document.querySelector('.footer-btn');
+    if (btn) {{
+      btn.classList.add('is-loading');
+      btn.setAttribute('aria-busy', 'true');
+      if (loadingLabel) btn.innerHTML = '<span>↻</span>' + loadingLabel;
+    }}
+    return fetch(url, {{ credentials: 'same-origin', redirect: 'follow' }})
+      .then(function (response) {{
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.text();
+      }})
+      .then(function (html) {{
+        document.open();
+        document.write(html);
+        document.close();
+      }})
+      .catch(function () {{
+        if (btn) {{
+          btn.classList.remove('is-loading');
+          btn.removeAttribute('aria-busy');
+        }}
+        showToast('Could not refresh. Check Wi-Fi and try again.', true);
+      }});
+  }}
+
+  var btn = document.querySelector('.footer-btn');
+  if (btn) {{
+    btn.addEventListener('click', function (event) {{
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      var href = btn.getAttribute('href') || '/';
+      var live = btn.getAttribute('data-loading') === 'true';
+      softNavigate(href, live ? 'Fetching weather…' : 'Updating…');
+    }});
+  }}
+
+  var refreshSeconds = parseInt(document.body.getAttribute('data-refresh') || '0', 10);
+  if (refreshSeconds > 0) {{
+    setInterval(function () {{
+      if (document.hidden) return;
+      softNavigate(location.pathname || '/', null);
+    }}, refreshSeconds * 1000);
+  }}
 }})();
 </script>
 </body>
