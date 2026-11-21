@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Wi‑Fi watchdog executable bit** — `scripts/wifi-watchdog.sh` is executable in git; `auto-update.sh` re-`chmod +x` after pull so systemd no longer hits `203/EXEC` / Permission denied.
+- **Wi‑Fi watchdog executable bit** — `scripts/wifi-watchdog.sh` is executable in git; `auto-update.sh` clears chmod-only dirt before pull and re-`chmod +x` after so systemd no longer hits `203/EXEC` / Permission denied.
 - **Wi‑Fi watchdog reboot thrash** — soft-reconnect on every failure; require **6** consecutive fails (~30 min) before reboot; **10 min** boot grace; **1 h** cool-down between hard recovers (Pi Zero W `brcmfmac` was reboot-looping overnight at the old 3-strike / 15 min threshold).
 - **Packaging license metadata** — `pyproject.toml` uses SPDX `license = "MIT"` (drops setuptools TOML-table deprecation noise on pip install).
 - **Irrigation credit on weather failure** — `keep_last_state` can leave the relay ALLOW when the API fails; history no longer credits `inches_per_cycle` unless the decision has no error.
