@@ -52,7 +52,7 @@ class DashboardView:
 _dashboard_css_cache: str | None = None
 
 
-def _load_dashboard_css() -> str:
+def load_dashboard_css() -> str:
     global _dashboard_css_cache
     if _dashboard_css_cache is None:
         _dashboard_css_cache = (
@@ -187,7 +187,7 @@ def render_dashboard_html(view: DashboardView) -> str:
         "</svg>"
     )
 
-    dashboard_css = _load_dashboard_css()
+    dashboard_css = load_dashboard_css()
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -259,6 +259,10 @@ def render_dashboard_html(view: DashboardView) -> str:
 
 <footer>
   <div class="footer-inner">
+    <nav class="site-nav" aria-label="Pages">
+      <a class="site-nav-link is-active" href="/" aria-current="page">Status</a>
+      <a class="site-nav-link" href="/config">Config</a>
+    </nav>
     <a class="footer-btn" href="{footer_href}" data-loading="{footer_loading}">
       <span>{footer_icon}</span>{esc(footer_label)}
     </a>

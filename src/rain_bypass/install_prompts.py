@@ -65,7 +65,8 @@ def parse_inches_per_cycle(value: str) -> float:
 
 def parse_check_time(value: str) -> tuple[int, int]:
     text = value.strip()
-    match = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+    # Optional seconds — HTML <input type="time"> may submit HH:MM:SS.
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})(?::\d{2})?", text)
     if not match:
         raise typer.BadParameter("Check time must be HH:MM in 24-hour format (e.g. 00:00).")
     watering = _prompt_field(

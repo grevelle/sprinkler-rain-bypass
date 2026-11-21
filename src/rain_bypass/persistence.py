@@ -12,17 +12,23 @@ logger = logging.getLogger(__name__)
 
 def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
     """Write text via temp file + replace so power loss cannot truncate the target."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    path_str = os.fspath(path)
+    parent = os.path.dirname(path_str)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp_str = os.path.join(
+        parent or ".",
+        f".{os.path.basename(path_str)}.{os.getpid()}.tmp",
+    )
     try:
-        with tmp.open("w", encoding=encoding, newline="\n") as handle:
+        with open(tmp_str, "w", encoding=encoding, newline="\n") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, path)
+        os.replace(tmp_str, path_str)
     finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
+        if os.path.exists(tmp_str):
+            os.unlink(tmp_str)
 
 
 def quarantine_corrupt(path: Path) -> Path | None:

@@ -284,13 +284,20 @@ def settings_to_toml_dict(settings: Settings) -> dict[str, Any]:
         runtime["history_path"] = str(settings.runtime.history_path)
     data["runtime"] = runtime
     balance = dict(data["balance"])
-    balance.pop("monthly", None)
+    # String keys so tomli_w emits [balance.monthly.N] tables that round-trip.
+    balance["monthly"] = {
+        str(month): {
+            "target_inches_per_month": settings.balance.monthly[month].target_inches_per_month
+        }
+        for month in range(1, 13)
+    }
     data["balance"] = balance
     return data
 
 
 def write_settings(path: Path | str, settings: Settings) -> None:
-    target = Path(path)
-    target.write_text(tomli_w.dumps(settings_to_toml_dict(settings)), encoding="utf-8")
+    # Coerce via fspath so tests that fake os.name=nt on Linux still use local Path.
+    target = Path(os.fspath(path))
+    atomic_write_text(target, tomli_w.dumps(settings_to_toml_dict(settings)))
     if os.name == "posix":
         os.chmod(target, 0o600)

@@ -307,6 +307,7 @@ def test_parse_check_time():
     from rain_bypass.install_prompts import parse_check_time
 
     assert parse_check_time("04:30") == (4, 30)
+    assert parse_check_time("04:30:00") == (4, 30)
     with pytest.raises(typer.BadParameter, match="HH:MM"):
         parse_check_time("430")
     with pytest.raises(typer.BadParameter):

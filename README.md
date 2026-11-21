@@ -159,6 +159,7 @@ avahi-resolve-host-name sprinkler.local
 
 - **`/`** — cached status (auto-refreshes every 60s)
 - **`/live`** — fetches live weather; rate-limited to about once every **5 minutes** (shows a note when skipped)
+- **`/config`** — day-to-day settings form (ZIP, API key, inches/cycle, check time, monthly targets, sewer window, forecast/event/freeze, fail mode). No password — LAN trust only. Blank API key keeps the current key. GPIO pins, web bind, and log level stay in `settings.toml`.
 
 If mDNS does not work on your phone (some Android browsers), use **`http://<pi-ip>/`** instead. The page is visible to anyone on your LAN — do not port-forward without adding auth.
 
@@ -396,8 +397,8 @@ Runs weather + decision + relay once, then exits (same as the service’s daily 
 
 | What | How |
 | ---- | --- |
-| API key, ZIP, inches/cycle, check time | `./configure.sh` (fast; restarts service) |
-| Sewer window, GPIO, monthly balance, etc. | `nano settings.toml` then `sudo systemctl restart rain-bypass` |
+| Day-to-day (ZIP, API key, inches/cycle, check time, monthly targets, sewer, fail mode, …) | Phone/browser **`/config`**, or `./configure.sh` for ZIP/key/inches/check |
+| GPIO, web bind, log level | `nano settings.toml` then `sudo systemctl restart rain-bypass` (restart also needed after web check-time changes) |
 
 After editing `settings.toml`, run `status` or `--once` to confirm the new logic.
 
@@ -413,7 +414,7 @@ After editing `settings.toml`, run `status` or `--once` to confirm the new logic
 | `weather`  | `api_key` (Visual Crossing Timeline API)                                                                                                                                                                                              |
 | `gpio`     | `relay`, `watering_enabled_led`, `watering_disabled_led`, `mock`                                                                                                                                                                      |
 | `runtime`  | `state_path`, optional `history_path`, `fail_mode`, `log_level`, `weather_timeout_seconds`, `weather_retries`, `weather_retry_backoff_seconds`                                                                                                                                                                     |
-| `web`      | `host` (default `0.0.0.0`), `port` (default `80`) — read-only dashboard (`rain-bypass serve`)                                                                                                                                                                |
+| `web`      | `host` (default `0.0.0.0`), `port` (default `80`) — status + `/config` (`rain-bypass serve`)                                                                                                                                                                  |
 
 
 `fail_mode`: `disable_watering` (default) or `keep_last_state` when the weather API fails.
@@ -579,7 +580,7 @@ flowchart TB
 | Layer | Modules | Role |
 | ----- | ------- | ---- |
 | **Core** | `paths`, `config`, `models`, `balance`, `windows`, `weather`, `logic`, `controller`, `gpio` | Daily check loop, weather fetch, balance math, relay control |
-| **Persistence & views** | `history`, `status`, `web`, `dashboard_html` | Append-only decision log; CLI status; dashboard view model + HTTP server; HTML templates |
+| **Persistence & views** | `history`, `status`, `web`, `dashboard_html`, `config_html` | Append-only decision log; CLI status; dashboard + config HTML; HTTP server |
 | **CLI** | `cli`, `__main__` | `rain-bypass` — run, status, history, serve |
 | **Installer** | `install_cli`, `install_flow`, `install_prompts`, `prompting` | Interactive setup wizard (`rain-bypass-install`) |
 | **Deploy** | `deploy` | systemd units (`_install_unit_if_confirmed`), mDNS/Avahi, auto-update timer |
@@ -598,7 +599,8 @@ flowchart TB
 | `strip_legacy_state_keys()` | `config.py` | `State.load`, legacy migration |
 | `gather_status()` / `preview()` | `status.py` / `logic.py` | status CLI, web dashboard |
 | `_append_weather_and_balance()` | `status.py` | live + saved evaluation sections in `format_status` |
-| `render_dashboard_html()` | `dashboard_html.py` | mobile HTML page (`web` HTTP server) |
+| `render_dashboard_html()` | `dashboard_html.py` | status HTML page (`web` HTTP server) |
+| `render_config_html()` / `apply_config_form()` | `config_html.py` / `web.py` | settings form + POST merge into `settings.toml` |
 
 Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from badge labels — different copy for CLI vs phone UI, not duplicate logic.
 
@@ -611,8 +613,8 @@ Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from b
 - **`logic`** — `decide()` runs the full control pipeline; `preview()` / `evaluate_weather()` power read-only status and web views.
 - **`controller`** — `tick()` calls `decide()`, sets GPIO, appends history, saves `state.json`; `run()` catch-up ticks if today's check is still pending, then loops until the next check time.
 - **`persistence`** — atomic text writes and corrupt-file quarantine helpers used by state and history.
-- **`web`** — builds `DashboardView` from status/history SSOT helpers; delegates HTML to `dashboard_html.render_dashboard_html`; rate-limits `/live` weather fetches.
-- **`dashboard_html`** — dashboard DTOs (`DashboardView`, etc.) and HTML template rendering; CSS from `static/dashboard.css`.
+- **`web`** — builds `DashboardView` from status/history SSOT helpers; serves `/`, `/live`, `/config`; `apply_config_form` merges POST into settings; rate-limits `/live` weather fetches.
+- **`dashboard_html` / `config_html`** — status and config HTML; shared CSS from `static/dashboard.css`.
 - **`install_cli`** — thin Typer entry point; prompts in `install_prompts`, flow in `install_flow`, shared prompters in `prompting`.
 - **`settings.example.toml`** — canonical defaults for install, tests, and `rain_bypass.config`.
 
@@ -630,6 +632,7 @@ Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from b
 | `tests/test_history.py` | Watering log, verdict/details helpers |
 | `tests/test_status.py` | Text status formatting |
 | `tests/test_web.py` | HTML dashboard (view + HTTP server) |
+| `tests/test_config_web.py` | `/config` form render, apply, HTTP GET/POST |
 | `tests/test_reliability.py` | Atomic writes, corrupt repair, catch-up / stale check, `/live` rate limit |
 | `tests/test_check_scripts.py` | Maintenance script smoke tests |
 | `tests/test_balance.py`, `test_config_io.py`, … | Focused unit tests |

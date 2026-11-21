@@ -9,7 +9,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 CSS_PATH = REPO / "src" / "rain_bypass" / "static" / "dashboard.css"
-HTML_PATH = REPO / "src" / "rain_bypass" / "dashboard_html.py"
+HTML_PATHS = (
+    REPO / "src" / "rain_bypass" / "dashboard_html.py",
+    REPO / "src" / "rain_bypass" / "config_html.py",
+)
 
 VERDICT_SUFFIXES = ("allow", "block", "unknown")
 VERDICT_PREFIXES = ("hero-", "status-ring-", "chip-", "dot-")
@@ -72,9 +75,11 @@ def main() -> int:
     css = CSS_PATH.read_text(encoding="utf-8")
     # @import URLs contain dots that look like class selectors to a naive scan.
     css_for_classes = re.sub(r"@import\s+url\([^)]+\)\s*;", "", css)
-    html = HTML_PATH.read_text(encoding="utf-8")
 
-    referenced = html_class_tokens(html) | python_class_tokens(HTML_PATH) | dynamic_allowlist()
+    referenced = set(dynamic_allowlist())
+    for path in HTML_PATHS:
+        referenced |= html_class_tokens(path.read_text(encoding="utf-8"))
+        referenced |= python_class_tokens(path)
     defined = css_classes(css_for_classes)
     orphan_classes = sorted(cls for cls in defined if cls not in referenced)
 

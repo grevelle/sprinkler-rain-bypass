@@ -112,13 +112,20 @@ def test_load_example_settings_monthly_override():
 
 
 def test_write_settings_round_trip(tmp_path: Path):
-    source = load_example_settings(weather={"api_key": "round-trip"})
+    source = load_example_settings(
+        weather={"api_key": "round-trip"},
+        balance={"monthly": {"6": {"target_inches_per_month": 8.25}}},
+    )
     path = tmp_path / "settings.toml"
     write_settings(path, source)
     loaded = load_settings(path)
     assert loaded.weather.api_key == "round-trip"
     assert loaded.balance.inches_per_cycle == source.balance.inches_per_cycle
     assert loaded.watering.event_lookback_days == source.watering.event_lookback_days
+    assert loaded.balance.monthly[6].target_inches_per_month == pytest.approx(8.25)
+    assert loaded.balance.monthly[7].target_inches_per_month == pytest.approx(5.0)
+    text = path.read_text(encoding="utf-8")
+    assert "[balance.monthly.6]" in text
 
 
 def test_write_settings_history_path(tmp_path: Path):

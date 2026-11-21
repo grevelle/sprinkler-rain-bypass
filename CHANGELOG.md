@@ -20,16 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Web config page** — `GET/POST /config` edits day-to-day `settings.toml` fields (ZIP, API key, inches/cycle, check time, monthly targets, sewer window, forecast/event/freeze, fail mode) with the same mobile skin as status; blank API key keeps the current secret; no auth (LAN trust). GPIO/web bind/log level stay file-only.
 - **Persistent journald** — Pi installer enables on-disk journals (`Storage=persistent`, 50 MB cap) so Wi‑Fi hangs and hard resets leave a trail.
 - **Wi‑Fi watchdog** — `scripts/wifi-watchdog.sh` + `rain-bypass-wifi-watchdog.timer` (every 5 min after a 10 min boot grace): soft `nmcli` reconnect on each LAN failure, reboot after 6 consecutive failures (~30 min) with a 1 h cool-down. Enable on an existing Pi with `rain-bypass-install setup-wifi-watchdog --yes`.
 - **Atomic persistence** — `state.json` and `watering_history.jsonl` writes use temp file + replace.
 - **Same-day history dedup** — a second cycle on the same local date replaces that day's history row (avoids double-counting irrigation on `--once` retries).
 - **`/live` rate limit** — live weather fetches are limited to about once every five minutes; the dashboard notes when a fetch is skipped.
 - **Wi‑Fi reliability on Pi** — installer disables NetworkManager Wi‑Fi power save and sets infinite reconnect retries (`deploy/nm-99-wifi-powersave-off.conf`), so a Pi Zero W recovers after AP/router outages without a reboot.
-- **Web dashboard** — `rain-bypass serve` exposes a read-only mobile HTML page on `[web]` host/port (default port 80). Routes: `/` (cached status) and `/live` (live weather). Pi installer optionally installs `rain-bypass-dashboard.service` with `CAP_NET_BIND_SERVICE` and ensures Avahi mDNS so phones can open `http://<hostname>.local/`.
+- **Web dashboard** — `rain-bypass serve` exposes a mobile HTML UI on `[web]` host/port (default port 80). Routes: `/` (cached status), `/live` (live weather), `/config` (settings form). Pi installer optionally installs `rain-bypass-dashboard.service` with `CAP_NET_BIND_SERVICE` and ensures Avahi mDNS so phones can open `http://<hostname>.local/`.
 
 ### Changed
 
+- **Atomic `settings.toml` writes** — `write_settings` uses temp file + replace (still `chmod 600` on POSIX); monthly balance targets are persisted (12 months) instead of being stripped on write.
 - **Dashboard UX** — tighter first viewport (cardless hero), lighter chrome, clearer type scale; soft `fetch` navigation for live/cached refresh with toast errors; JS interval replaces meta-refresh; water budget reads as “X of Y” with pace; history uses short dates and inline Why.
 - **Unified CI entrypoint** — `scripts/ci.py` is the single task list for GitHub Actions, pre-push, and local wrappers (`ci.sh` / `ci.ps1`); pytest coverage/markers come only from `pyproject.toml`.
 - **Dead wrappers** — removed unused `scripts/check_shell_functions.sh`; inlined single-use CI/logic helpers.
