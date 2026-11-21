@@ -17,8 +17,8 @@ install_cli.setup_autoupdate
 
 # Pydantic validators and model_config hooks.
 config.Settings.normalize_zip_code
-config.BalanceSettings.merge_monthly_overrides
-config.RuntimeSettings.normalize_log_level
+config.Balance.merge_monthly_overrides
+config.Runtime.normalize_log_level
 config.FrozenModel.model_config
 weather.TimelineDay.model_config
 weather.TimelineResponse.model_config
