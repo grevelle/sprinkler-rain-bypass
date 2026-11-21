@@ -23,16 +23,12 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from _ci_common import REPO, shell_script_args  # noqa: E402
+from _ci_common import REPO, shell_scripts  # noqa: E402
 
 
 def _run(label: str, argv: Sequence[str]) -> None:
     print(f"==> {label}", flush=True)
     subprocess.run(list(argv), check=True, cwd=REPO)
-
-
-def _python() -> str:
-    return sys.executable
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -48,7 +44,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Auto-fix with ruff instead of check-only (local convenience).",
     )
     args = parser.parse_args(argv)
-    py = _python()
+    py = sys.executable
     os.chdir(REPO)
     # Prefer this interpreter's scripts dir (ruff, shellcheck-py, pyright) on PATH.
     bin_dir = str(Path(py).resolve().parent)
@@ -72,7 +68,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if shellcheck is None:
         print("error: shellcheck not found on PATH", file=sys.stderr)
         return 1
-    _run("shellcheck", [shellcheck, *shell_script_args()])
+    shell_args = [str(p.relative_to(REPO)).replace("\\", "/") for p in shell_scripts()]
+    _run("shellcheck", [shellcheck, *shell_args])
 
     _run("check LF", [py, str(REPO / "scripts" / "check_lf.py")])
     _run("check dashboard CSS", [py, str(REPO / "scripts" / "check_dashboard_css.py")])

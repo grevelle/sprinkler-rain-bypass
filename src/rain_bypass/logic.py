@@ -30,25 +30,6 @@ def _daily_context(settings: Settings) -> _DailyContext:
     )
 
 
-def _sewer_decision(settings: Settings) -> Decision | None:
-    ctx = _daily_context(settings)
-    if not ctx.sewer:
-        return None
-    sewer = settings.sewer
-    logger.info(
-        "sewer lockout (%02d/%02d-%02d/%02d); watering blocked to protect annual sewer cap",
-        sewer.start_month,
-        sewer.start_day,
-        sewer.end_month,
-        sewer.end_day,
-    )
-    return Decision(
-        watering_required=False,
-        evaluation=None,
-        error=None,
-    )
-
-
 def safety_allows_watering(snapshot: WeatherSnapshot, settings: Settings) -> bool:
     if snapshot.freeze_block:
         return False
@@ -94,10 +75,6 @@ def evaluate_weather(
     )
 
 
-def _safety_fields_saved(state: State) -> bool:
-    return state.max_daily_inches is not None and state.freeze_block is not None
-
-
 def _build_preview(
     *,
     irrigation_mtd_value: float,
@@ -132,14 +109,13 @@ def preview(settings: Settings, state: State, *, fetch_live: bool = True) -> Pre
         saved = WeatherSnapshot.from_state(state)
         if saved is None:
             return _build_preview(irrigation_mtd_value=ctx.irr, cached_verdict=cached)
-        safety_known = _safety_fields_saved(state)
         evaluation = evaluate_weather(settings, saved, ctx.irr, ctx.today)
         return _build_preview(
             irrigation_mtd_value=ctx.irr,
             evaluation=evaluation,
             cached_verdict=cached,
             from_saved_weather=True,
-            safety_known=safety_known,
+            safety_known=state.max_daily_inches is not None and state.freeze_block is not None,
         )
 
     try:
@@ -152,11 +128,21 @@ def preview(settings: Settings, state: State, *, fetch_live: bool = True) -> Pre
 
 
 def decide(settings: Settings, state: State) -> Decision:
-    sewer = _sewer_decision(settings)
-    if sewer is not None:
-        return sewer
-
     ctx = _daily_context(settings)
+    if ctx.sewer:
+        sewer = settings.sewer
+        logger.info(
+            "sewer lockout (%02d/%02d-%02d/%02d); watering blocked to protect annual sewer cap",
+            sewer.start_month,
+            sewer.start_day,
+            sewer.end_month,
+            sewer.end_day,
+        )
+        return Decision(
+            watering_required=False,
+            evaluation=None,
+            error=None,
+        )
 
     try:
         snapshot = fetch_weather(settings)

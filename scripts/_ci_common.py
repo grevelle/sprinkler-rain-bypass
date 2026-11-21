@@ -23,7 +23,3 @@ def shell_scripts() -> list[Path]:
             seen.add(resolved)
             out.append(path)
     return out
-
-
-def shell_script_args() -> list[str]:
-    return [str(path.relative_to(REPO)).replace("\\", "/") for path in shell_scripts()]
