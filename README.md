@@ -29,7 +29,7 @@ cp settings.example.toml settings.toml
 
 `settings.example.toml` is the canonical default config. Tests and `rain_bypass.config` derive settings from it. Run `./install.sh` (or `rain-bypass-install`) for the interactive setup wizard.
 
-**Change API key, ZIP, inches per cycle, or check time** — `./configure.sh` (see [Configure](#configure-api-key-zip-inchescycle-check-time)).
+**Change day-to-day settings** — phone/browser **`/config`**, or `./configure.sh` for ZIP/API key/inches/check time (see [Configure](#configure-api-key-zip-inchescycle-check-time) and [Web dashboard](#web-dashboard-phone)).
 
 ### Pi Zero W notes
 
@@ -88,9 +88,9 @@ cd ~/sprinkler-rain-bypass
 ./configure.sh --no-restart                 # write settings.toml only
 ```
 
-Prompts update location (ZIP lookup), `inches_per_cycle`, and daily check time. **Other settings** (sewer window, GPIO, monthly balance overrides) are preserved.
+Prompts update location (ZIP lookup), `inches_per_cycle`, and daily check time; other keys in `settings.toml` are preserved. Prefer **`http://sprinkler.local/config`** for day-to-day edits (ZIP, API key, inches/cycle, check time, monthly targets, sewer window, fail mode, and related watering fields).
 
-Edit settings the wizard does not cover, then restart:
+GPIO pins, web bind, and log level stay file-only:
 
 ```bash
 nano settings.toml
@@ -140,7 +140,7 @@ rain-bypass status --cached
 
 ### Web dashboard (phone)
 
-Read-only HTML dashboard for home Wi‑Fi. The installer can enable **`rain-bypass-dashboard`** on port **80** with mDNS so you can open **`http://sprinkler.local/`** (use your Pi hostname — check with `hostnamectl`).
+Mobile HTML UI for home Wi‑Fi: status plus a settings form at **`/config`**. The installer can enable **`rain-bypass-dashboard`** on port **80** with mDNS so you can open **`http://sprinkler.local/`** (use your Pi hostname — check with `hostnamectl`).
 
 ```bash
 cd ~/sprinkler-rain-bypass
@@ -175,7 +175,7 @@ flowchart LR
   decide --> relay[state.json<br/>relay + weather snapshot]
   decide --> hist[watering_history.jsonl<br/>decision log + inches credited]
   hist --> balance[Balance math<br/>irrigation_mtd]
-  relay --> status[status / web<br/>read-only views]
+  relay --> status[status / web<br/>status + /config]
   hist --> status
 ```
 
@@ -539,10 +539,10 @@ flowchart TB
     config[config.py]
   end
 
-  subgraph views [Read-only views]
+  subgraph views [Status and web UI]
     status[status.py]
-    web["web.py + dashboard_html.py"]
-    webHtml["dashboard_html.py<br/>render_dashboard_html"]
+    web["web.py"]
+    webHtml["dashboard_html.py / config_html.py"]
   end
 
   subgraph deployMod [Deploy]
