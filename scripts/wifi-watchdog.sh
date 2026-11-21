@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Recover Pi Zero W Wi-Fi when brcmfmac hangs and LAN becomes unreachable.
-# Soft-reconnect on first failure; reboot after sustained failures (~15 min at 5 min interval).
+# Soft-reconnect on each failure; reboot after sustained failures, with a reboot cool-down
+# so a flaky radio cannot reboot-loop overnight.
 set -euo pipefail
 
 LOG_TAG="rain-bypass-wifi-watchdog"
 IFACE="${RAIN_BYPASS_WIFI_IFACE:-wlan0}"
-MAX_FAILURES="${RAIN_BYPASS_WIFI_MAX_FAILURES:-3}"
-BOOT_GRACE_SEC="${RAIN_BYPASS_WIFI_BOOT_GRACE_SEC:-300}"
+# 6 × 5 min ≈ 30 min offline before reboot (was 3 ≈ 15 min; too aggressive on flaky brcmfmac).
+MAX_FAILURES="${RAIN_BYPASS_WIFI_MAX_FAILURES:-6}"
+BOOT_GRACE_SEC="${RAIN_BYPASS_WIFI_BOOT_GRACE_SEC:-600}"
+REBOOT_COOLDOWN_SEC="${RAIN_BYPASS_WIFI_REBOOT_COOLDOWN_SEC:-3600}"
 STATE_DIR="${RAIN_BYPASS_WIFI_STATE_DIR:-/var/lib/rain-bypass}"
 STATE_FILE="${STATE_DIR}/wifi-watchdog.count"
-PING_WAIT_SEC="${RAIN_BYPASS_WIFI_PING_WAIT_SEC:-3}"
+REBOOT_STAMP="${STATE_DIR}/wifi-watchdog.last-reboot"
+PING_WAIT_SEC="${RAIN_BYPASS_WIFI_PING_WAIT_SEC:-5}"
 
 log() {
   printf '%s\n' "$*"
@@ -39,6 +43,20 @@ read_failures() {
 write_failures() {
   mkdir -p "${STATE_DIR}"
   printf '%s\n' "$1" > "${STATE_FILE}"
+}
+
+reboot_in_cooldown() {
+  local now last
+  [[ -f "${REBOOT_STAMP}" ]] || return 1
+  now="$(date +%s)"
+  last="$(tr -d '[:space:]' < "${REBOOT_STAMP}" || true)"
+  [[ "${last}" =~ ^[0-9]+$ ]] || return 1
+  ((now - last < REBOOT_COOLDOWN_SEC))
+}
+
+mark_reboot() {
+  mkdir -p "${STATE_DIR}"
+  date +%s > "${REBOOT_STAMP}"
 }
 
 default_gateway() {
@@ -83,6 +101,7 @@ soft_recover() {
 
 reboot_now() {
   log "hard recover: rebooting after ${MAX_FAILURES} consecutive Wi-Fi failures"
+  mark_reboot
   sleep 2
   if [[ "$(id -u)" -eq 0 ]]; then
     systemctl reboot
@@ -110,18 +129,20 @@ main() {
   write_failures "${failures}"
   log "LAN check failed on ${IFACE} (failure ${failures}/${MAX_FAILURES})"
 
-  if ((failures == 1)); then
-    soft_recover
-    sleep 5
-    if lan_ok; then
-      log "soft recover succeeded"
-      write_failures 0
-      exit 0
-    fi
-    log "soft recover did not restore LAN"
+  soft_recover
+  sleep 5
+  if lan_ok; then
+    log "soft recover succeeded"
+    write_failures 0
+    exit 0
   fi
+  log "soft recover did not restore LAN"
 
   if ((failures >= MAX_FAILURES)); then
+    if reboot_in_cooldown; then
+      log "reboot cool-down active (<${REBOOT_COOLDOWN_SEC}s since last hard recover); not rebooting"
+      exit 0
+    fi
     reboot_now
   fi
 }

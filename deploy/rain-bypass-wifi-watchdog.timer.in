@@ -3,8 +3,8 @@
 Description=Wi-Fi watchdog timer for Sprinkler Rain Bypass
 
 [Timer]
-# First check 5 minutes after boot (grace for slow Zero W associate), then every 5 minutes.
-OnBootSec=5min
+# First check 10 minutes after boot (aligns with script boot grace), then every 5 minutes.
+OnBootSec=10min
 OnUnitActiveSec=5min
 AccuracySec=30s
 Persistent=true

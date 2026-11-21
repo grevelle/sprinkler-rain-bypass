@@ -7,7 +7,7 @@ name = "sprinkler-rain-bypass"
 version = "5.2.4"
 description = "Raspberry Pi rain bypass controller for irrigation systems"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Greg Revelle" }]
 dependencies = [
     "httpx",

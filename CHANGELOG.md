@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Wi‑Fi watchdog executable bit** — `scripts/wifi-watchdog.sh` is executable in git; `auto-update.sh` re-`chmod +x` after pull so systemd no longer hits `203/EXEC` / Permission denied.
+- **Wi‑Fi watchdog reboot thrash** — soft-reconnect on every failure; require **6** consecutive fails (~30 min) before reboot; **10 min** boot grace; **1 h** cool-down between hard recovers (Pi Zero W `brcmfmac` was reboot-looping overnight at the old 3-strike / 15 min threshold).
+- **Packaging license metadata** — `pyproject.toml` uses SPDX `license = "MIT"` (drops setuptools TOML-table deprecation noise on pip install).
 - **Irrigation credit on weather failure** — `keep_last_state` can leave the relay ALLOW when the API fails; history no longer credits `inches_per_cycle` unless the decision has no error.
 - **Sewer lockout window** — Hartland Q1 meter period is **Dec 16–Mar 15** (not Jan 16); `in_sewer_lockout` correctly handles year-wrapping ranges.
 - **Midnight weather fetch** — Visual Crossing requests now retry with backoff on connect/timeout/5xx/429, and logs include the httpx error type (API key redacted). Survives brief Wi‑Fi/AP blips at the daily check.
@@ -18,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Persistent journald** — Pi installer enables on-disk journals (`Storage=persistent`, 50 MB cap) so Wi‑Fi hangs and hard resets leave a trail.
-- **Wi‑Fi watchdog** — `scripts/wifi-watchdog.sh` + `rain-bypass-wifi-watchdog.timer` (every 5 min after a 5 min boot grace): soft `nmcli` reconnect on first LAN failure, reboot after 3 consecutive failures (~15 min). Enable on an existing Pi with `rain-bypass-install setup-wifi-watchdog --yes`.
+- **Wi‑Fi watchdog** — `scripts/wifi-watchdog.sh` + `rain-bypass-wifi-watchdog.timer` (every 5 min after a 10 min boot grace): soft `nmcli` reconnect on each LAN failure, reboot after 6 consecutive failures (~30 min) with a 1 h cool-down. Enable on an existing Pi with `rain-bypass-install setup-wifi-watchdog --yes`.
 - **Atomic persistence** — `state.json` and `watering_history.jsonl` writes use temp file + replace.
 - **Same-day history dedup** — a second cycle on the same local date replaces that day's history row (avoids double-counting irrigation on `--once` retries).
 - **`/live` rate limit** — live weather fetches are limited to about once every five minutes; the dashboard notes when a fetch is skipped.

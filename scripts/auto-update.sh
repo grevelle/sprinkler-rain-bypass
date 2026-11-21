@@ -81,6 +81,9 @@ else
   log "warning: git pull failed (continuing with local tree)"
 fi
 
+# Keep oneshot scripts executable even if a pull drops the bit (Windows checkouts).
+chmod +x "${ROOT}/scripts/auto-update.sh" "${ROOT}/scripts/wifi-watchdog.sh" 2>/dev/null || true
+
 after_rev=""
 if git rev-parse HEAD >/dev/null 2>&1; then
   after_rev="$(git rev-parse HEAD)"
