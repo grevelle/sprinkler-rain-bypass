@@ -75,6 +75,10 @@ if git rev-parse HEAD >/dev/null 2>&1; then
 fi
 
 log "Pulling latest application code"
+# Drop chmod-only dirt on maintenance scripts so ff-only pull is not blocked.
+if git rev-parse HEAD >/dev/null 2>&1; then
+  git checkout -- scripts/auto-update.sh scripts/wifi-watchdog.sh 2>/dev/null || true
+fi
 if git pull --ff-only origin main 2>/dev/null || git pull --ff-only 2>/dev/null; then
   :
 else
