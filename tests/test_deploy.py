@@ -434,7 +434,9 @@ def test_ensure_mdns_without_systemctl(monkeypatch):
     monkeypatch.setattr("rain_bypass.deploy.verify_mdns", lambda _host: True)
     monkeypatch.setattr("rain_bypass.deploy.system_hostname", lambda: "sprinkler")
     assert ensure_mdns(run_command=fake_run) is True
-    assert len(calls) == 1
+    assert len(calls) == 2
+    assert calls[0][:4] == ["sudo", "apt-get", "install", "-y"]
+    assert calls[1][:3] == ["sudo", "sed", "-i"]
 
 
 def test_verify_mdns_retries_before_success(monkeypatch):
@@ -540,7 +542,10 @@ def test_ensure_mdns_installs_and_verifies(monkeypatch):
     assert ensure_mdns(run_command=fake_run) is True
     assert calls[0][:4] == ["sudo", "apt-get", "install", "-y"]
     assert "avahi-daemon" in calls[0]
-    assert calls[1] == ["sudo", "systemctl", "enable", "--now", "avahi-daemon"]
+    assert calls[1][:3] == ["sudo", "sed", "-i"]
+    assert "use-ipv6=no" in calls[1][3]
+    assert calls[2] == ["sudo", "systemctl", "enable", "--now", "avahi-daemon"]
+    assert calls[3] == ["sudo", "systemctl", "restart", "avahi-daemon"]
 
 
 def test_ensure_mdns_verify_warning(monkeypatch):
@@ -629,6 +634,15 @@ def test_ensure_wifi_reliability_installs(monkeypatch, tmp_path):
         "connection.autoconnect-retries",
         "0",
     ] in calls
+    assert [
+        "sudo",
+        "nmcli",
+        "connection",
+        "modify",
+        "netplan-wlan0-xcite",
+        "ipv6.method",
+        "disabled",
+    ] in calls
     assert [str(iw_bin), "dev", "wlan0", "set", "power_save", "off"] in calls
 
 
@@ -683,6 +697,15 @@ def test_ensure_wifi_reliability_decodes_bytes_stdout(monkeypatch, tmp_path):
         "home-wifi",
         "802-11-wireless.powersave",
         "2",
+    ] in calls
+    assert [
+        "sudo",
+        "nmcli",
+        "connection",
+        "modify",
+        "home-wifi",
+        "ipv6.method",
+        "disabled",
     ] in calls
 
 

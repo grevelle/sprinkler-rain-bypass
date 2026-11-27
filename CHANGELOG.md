@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`sprinkler.local` IPv6 timeout** — Wi‑Fi profiles set `ipv6.method=disabled` during `ensure_wifi_reliability`, so mDNS advertises IPv4 only. Windows/phones were preferring the Pi’s global AAAA (ISP RA) and hanging while `http://<ipv4>/` still worked.
 - **Wi‑Fi watchdog executable bit** — `scripts/wifi-watchdog.sh` is executable in git; `auto-update.sh` clears chmod-only dirt before pull and re-`chmod +x` after so systemd no longer hits `203/EXEC` / Permission denied.
 - **Wi‑Fi watchdog reboot thrash** — soft-reconnect on every failure; require **6** consecutive fails (~30 min) before reboot; **10 min** boot grace; **1 h** cool-down between hard recovers (Pi Zero W `brcmfmac` was reboot-looping overnight at the old 3-strike / 15 min threshold).
 - **Packaging license metadata** — `pyproject.toml` uses SPDX `license = "MIT"` (drops setuptools TOML-table deprecation noise on pip install).
@@ -27,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Atomic persistence** — `state.json` and `watering_history.jsonl` writes use temp file + replace.
 - **Same-day history dedup** — a second cycle on the same local date replaces that day's history row (avoids double-counting irrigation on `--once` retries).
 - **`/live` rate limit** — live weather fetches are limited to about once every five minutes; the dashboard notes when a fetch is skipped.
-- **Wi‑Fi reliability on Pi** — installer disables NetworkManager Wi‑Fi power save and sets infinite reconnect retries (`deploy/nm-99-wifi-powersave-off.conf`), so a Pi Zero W recovers after AP/router outages without a reboot.
+- **Wi‑Fi reliability on Pi** — installer disables NetworkManager Wi‑Fi power save, disables IPv6 on Wi‑Fi profiles (IPv4-only mDNS), and sets infinite reconnect retries (`deploy/nm-99-wifi-powersave-off.conf`), so a Pi Zero W recovers after AP/router outages without a reboot.
 - **Web dashboard** — `rain-bypass serve` exposes a mobile HTML UI on `[web]` host/port (default port 80). Routes: `/` (cached status), `/live` (live weather), `/config` (settings form). Pi installer optionally installs `rain-bypass-dashboard.service` with `CAP_NET_BIND_SERVICE` and ensures Avahi mDNS so phones can open `http://<hostname>.local/`.
 
 ### Changed

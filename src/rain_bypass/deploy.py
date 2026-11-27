@@ -134,8 +134,20 @@ def ensure_mdns(*, run_command: RunCommand | None = None) -> bool:
         ["sudo", "apt-get", "install", "-y", "-qq", "avahi-daemon", "avahi-utils"],
         check=True,
     )
+    # Prefer IPv4 A records only — Windows/phones often hang on a global AAAA.
+    runner(
+        [
+            "sudo",
+            "sed",
+            "-i",
+            "s/^#\\?use-ipv6=.*/use-ipv6=no/",
+            "/etc/avahi/avahi-daemon.conf",
+        ],
+        check=False,
+    )
     if shutil.which("systemctl") is not None:
         runner(["sudo", "systemctl", "enable", "--now", "avahi-daemon"], check=True)
+        runner(["sudo", "systemctl", "restart", "avahi-daemon"], check=False)
 
     if verify_mdns(hostname):
         typer.echo(f"==> mDNS OK — open http://{hostname}.local/ on your phone")
@@ -150,11 +162,13 @@ def ensure_mdns(*, run_command: RunCommand | None = None) -> bool:
 
 
 def ensure_wifi_reliability(*, run_command: RunCommand | None = None) -> bool:
-    """Disable Wi-Fi power save and set infinite NetworkManager reconnect retries.
+    """Harden Pi Wi-Fi for LAN appliance use.
 
-    Pi Zero W (brcmfmac) often fails to reassociate after an AP outage when power
-    save is on; a reboot then appears required. Returns True when the NM drop-in
-    was installed.
+    Disables power save, sets infinite NetworkManager reconnect retries, and
+    disables IPv6 on Wi-Fi profiles so ``hostname.local`` advertises A (IPv4)
+    only — Windows/phones often prefer a broken global AAAA and then time out.
+
+    Returns True when the NM drop-in was installed.
     """
     if os.name != "posix":
         return False
@@ -195,12 +209,19 @@ def ensure_wifi_reliability(*, run_command: RunCommand | None = None) -> bool:
             ["sudo", "nmcli", "connection", "modify", name, "connection.autoconnect-retries", "0"],
             check=False,
         )
+        runner(
+            ["sudo", "nmcli", "connection", "modify", name, "ipv6.method", "disabled"],
+            check=False,
+        )
 
     iw = shutil.which("iw") or "/sbin/iw"
     if Path(iw).is_file():
         runner([iw, "dev", "wlan0", "set", "power_save", "off"], check=False)
 
-    typer.echo("==> Wi-Fi power save disabled; NetworkManager will retry reconnects forever")
+    typer.echo(
+        "==> Wi-Fi power save off; IPv6 disabled on Wi-Fi; "
+        "NetworkManager will retry reconnects forever"
+    )
     return True
 
 

@@ -161,7 +161,7 @@ avahi-resolve-host-name sprinkler.local
 - **`/live`** — fetches live weather; rate-limited to about once every **5 minutes** (shows a note when skipped)
 - **`/config`** — day-to-day settings form (ZIP, API key, inches/cycle, check time, monthly targets, sewer window, forecast/event/freeze, fail mode). No password — LAN trust only. Blank API key keeps the current key. GPIO pins, web bind, and log level stay in `settings.toml`.
 
-If mDNS does not work on your phone (some Android browsers), use **`http://<pi-ip>/`** instead. The page is visible to anyone on your LAN — do not port-forward without adding auth.
+If mDNS does not work on your phone (some Android browsers), use **`http://<pi-ip>/`** instead. The installer disables **IPv6 on Wi‑Fi** so `.local` resolves to IPv4 (avoids Windows/phones hanging on a global AAAA). The page is visible to anyone on your LAN — do not port-forward without adding auth.
 
 ### Watering history
 
@@ -645,7 +645,7 @@ Relay **prose** (`status.relay_label`, `web._relay_short`) stays separate from b
 | `scripts/check_test_fixtures.py` | Fail CI on unreferenced conftest fixtures |
 | `scripts/check_shell_functions.py` | Fail CI on unused shell functions |
 | `deploy/*.service.in` | systemd unit templates |
-| `deploy/nm-99-wifi-powersave-off.conf` | NetworkManager drop-in: disable Wi‑Fi power save on Pi |
+| `deploy/nm-99-wifi-powersave-off.conf` | NetworkManager drop-in: disable Wi‑Fi power save on Pi (installer also sets `ipv6.method=disabled` on Wi‑Fi profiles) |
 
 Typer powers `rain-bypass` and `rain-bypass-install`. The package ships **`py.typed`** (PEP 561) for downstream type checkers. Code targets **Python 3.12+** syntax (PEP 695 aliases, `match`/`case`, `typing.override`); CI and the Pi runtime use the latest **3.x** (3.13 on current Pi OS).
 
